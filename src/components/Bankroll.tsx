@@ -1,16 +1,26 @@
 import { useMemo } from 'react'
-import { initialBasis, initialMode, initialRisk, initialThreshold, useSetting } from '../utils/settings'
+import {
+  initialAgree,
+  initialBasis,
+  initialMinProb,
+  initialMode,
+  initialOddsMax,
+  initialOddsMin,
+  initialRisk,
+  initialThreshold,
+  useSetting,
+} from '../utils/settings'
 
 interface Bet {
   date: string
   homeName: string
   awayName: string
-  pModelOver: number
-  pModelUnder: number
-  pMarketOver: number
-  pMarketUnder: number
-  oddsOver: number
-  oddsUnder: number
+  pModelH: number
+  pModelA: number
+  pMarketH: number
+  pMarketA: number
+  oddsHome: number
+  oddsAway: number
 }
 
 interface BankrollProps {
@@ -18,6 +28,8 @@ interface BankrollProps {
   bank: number
   onBank: (value: number) => void
   day: string
+  minConfidence: number
+  onMinConfidence: (value: number) => void
 }
 
 const MAX_STAKE_SHARE = 0.1
@@ -39,18 +51,28 @@ interface Stake extends Candidate {
   share: number
 }
 
-function buildCandidates(bets: Bet[], basis: number, threshold: number): Candidate[] {
+interface Filters {
+  minProb: number
+  agree: boolean
+  oddsMin: number
+  oddsMax: number
+}
+
+function buildCandidates(bets: Bet[], basis: number, threshold: number, filters: Filters): Candidate[] {
   const rows: Candidate[] = []
   for (const b of bets) {
     const sides = [
-      { side: 'Больше 5.5', pModel: b.pModelOver, pMarket: b.pMarketOver, odds: b.oddsOver },
-      { side: 'Меньше 5.5', pModel: b.pModelUnder, pMarket: b.pMarketUnder, odds: b.oddsUnder },
+      { side: `Победа: ${b.homeName}`, pModel: b.pModelH, pMarket: b.pMarketH, odds: b.oddsHome },
+      { side: `Победа: ${b.awayName}`, pModel: b.pModelA, pMarket: b.pMarketA, odds: b.oddsAway },
     ]
     let best: Candidate | null = null
     for (const s of sides) {
       if (!(s.odds > 1)) continue
       if (!Number.isFinite(s.pMarket) || s.pMarket <= 0 || s.pMarket > 1) continue
       if (!Number.isFinite(s.pModel) || s.pModel < 0 || s.pModel > 1) continue
+      if (s.pModel < filters.minProb) continue
+      if (filters.agree && !(s.pModel >= 0.5 && s.pMarket >= 0.5)) continue
+      if (s.odds < filters.oddsMin || s.odds > filters.oddsMax) continue
       const pBasis = basis * s.pMarket + (1 - basis) * s.pModel
       const ev = pBasis * s.odds - 1
       if (!Number.isFinite(ev) || ev < threshold) continue
@@ -81,10 +103,20 @@ interface SideInfo {
 
 function bestSide(b: Bet, basis: number): SideInfo | null {
   const sides = [
-    { side: 'Больше 5.5', pModel: b.pModelOver, pMarket: b.pMarketOver, odds: b.oddsOver },
-    { side: 'Меньше 5.5', pModel: b.pModelUnder, pMarket: b.pMarketUnder, odds: b.oddsUnder },
+    { side: `Победа: ${b.homeName}`, pModel: b.pModelH, pMarket: b.pMarketH, odds: b.oddsHome },
+    { side: `Победа: ${b.awayName}`, pModel: b.pModelA, pMarket: b.pMarketA, odds: b.oddsAway },
   ]
-    .filter((s) => s.odds > 1 && s.pMarket > 0)
+    .filter(
+      (s) =>
+        Number.isFinite(s.odds) &&
+        s.odds > 1 &&
+        Number.isFinite(s.pMarket) &&
+        s.pMarket > 0 &&
+        s.pMarket <= 1 &&
+        Number.isFinite(s.pModel) &&
+        s.pModel >= 0 &&
+        s.pModel <= 1,
+    )
     .map((s) => {
       const pBasis = basis * s.pMarket + (1 - basis) * s.pModel
       return { ...s, pBasis, ev: pBasis * s.odds - 1 }
@@ -155,7 +187,8 @@ interface Allocation {
 
 function maxProbabilityAllocation(candidates: Candidate[], bank: number): Allocation | null {
   const k = candidates.length
-  if (k === 0 || k > 16) return null
+  // Полный перебор подмножеств — O(3^k). Ограничиваем, чтобы не морозить UI.
+  if (k === 0 || k > 12) return null
   let best: Allocation | null = null
   for (let mask = 1; mask < 1 << k; mask += 1) {
     const subset: Candidate[] = []
@@ -175,16 +208,25 @@ function maxProbabilityAllocation(candidates: Candidate[], bank: number): Alloca
   return best
 }
 
-export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
+export function Bankroll({ bets, bank, onBank, day, minConfidence, onMinConfidence }: BankrollProps) {
   const [basis, setBasis] = useSetting(initialBasis, 'basis2')
   const [threshold, setThreshold] = useSetting(initialThreshold, 'ev2')
   const [mode, setMode] = useSetting(initialMode, 'mode2')
 
   const [risk, setRisk] = useSetting(initialRisk, 'risk')
+  const [minProb, setMinProb] = useSetting(initialMinProb, 'minProb')
+  const [agree, setAgree] = useSetting(initialAgree, 'agree')
+  const [oddsMin, setOddsMin] = useSetting(initialOddsMin, 'oddsMin2')
+  const [oddsMax, setOddsMax] = useSetting(initialOddsMax, 'oddsMax2')
 
   const derived = useMemo(() => {
     const dayB = bets.filter((b) => b.date === day)
-    const cands = buildCandidates(dayB, basis, threshold / 100)
+    const cands = buildCandidates(dayB, basis, threshold / 100, {
+      minProb: minProb / 100,
+      agree: agree === 1,
+      oddsMin,
+      oddsMax,
+    })
     const bud = Math.round((bank * risk) / 100)
     const kelly = capTotal(kellyStakes(cands, bud), bud).filter((s) => s.stake >= MIN_STAKE)
     const maxProb = (maxProbabilityAllocation(cands, bud)?.stakes ?? []).filter((s) => s.stake >= MIN_STAKE)
@@ -213,7 +255,7 @@ export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
       minBankOne: shares.length ? bankFor(Math.max(...shares)) : 0,
       minBankAll: shares.length ? bankFor(Math.min(...shares)) : 0,
     }
-  }, [bets, day, basis, threshold, bank, risk])
+  }, [bets, day, basis, threshold, bank, risk, minProb, agree, oddsMin, oddsMax])
 
   const {
     dayBets,
@@ -285,7 +327,7 @@ export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
       </div>
 
       {dayBets.length > 0 && (
-        <p className="caption">Купон на день: на кого ставить и сколько (остальные — пропуск)</p>
+        <p className="caption">Купон на день: матч → исход (победа с учётом ОТ/буллитов) и сумма ставки</p>
       )}
       {dayBets.map((b) => {
         const info = bestSide(b, basis)
@@ -295,13 +337,13 @@ export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
         return (
           <div className="bet" key={match}>
             <span className="bet-match">
-              {match}
               {stake ? (
                 <>
-                  {' → '}
-                  <b>{info.side}</b>
+                  {match} → <b className="bet-stake">{info.side}</b>
                 </>
-              ) : null}
+              ) : (
+                match
+              )}
             </span>
             <span className="match-meta">
               <span>кэф {info.odds.toFixed(2)}</span>
@@ -316,7 +358,10 @@ export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
       })}
 
       {candidates.length === 0 && (
-        <p className="caption">Нет ставок с положительным ожиданием: модель нигде не даёт перевеса над рынком.</p>
+        <p className="caption">
+          Нет ставок, проходящих фильтры (EV, мин. вероятность модели, согласие с рынком, диапазон кэфов).
+          Ослабь фильтры в «Дополнительных настройках».
+        </p>
       )}
 
       {candidates.length > 0 && mode === 0 && (
@@ -421,6 +466,50 @@ export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
               value={threshold}
               onChange={(e) => setThreshold(Number(e.target.value))}
             />
+          </label>
+        </div>
+        <div className="weight">
+          <label>
+            Мин. вероятность модели: {minProb}%
+            <input
+              type="range"
+              min={0}
+              max={60}
+              step={5}
+              value={minProb}
+              onChange={(e) => setMinProb(Number(e.target.value))}
+            />
+          </label>
+        </div>
+        <div className="weight">
+          <label>
+            Уверенность модели для красной рамки: {minConfidence}% (от этого значения)
+            <input
+              type="range"
+              min={0}
+              max={90}
+              step={1}
+              value={minConfidence}
+              onChange={(e) => onMinConfidence(Number(e.target.value))}
+            />
+          </label>
+        </div>
+        <label className="kelly">
+          <input
+            type="checkbox"
+            checked={agree === 1}
+            onChange={(e) => setAgree(e.target.checked ? 1 : 0)}
+          />
+          Только при согласии с рынком (оба считают фаворитом одну команду)
+        </label>
+        <div className="kelly">
+          <label>
+            Кэф от
+            <input type="number" step={0.1} value={oddsMin} onChange={(e) => setOddsMin(Number(e.target.value))} />
+          </label>
+          <label>
+            до
+            <input type="number" step={0.1} value={oddsMax} onChange={(e) => setOddsMax(Number(e.target.value))} />
           </label>
         </div>
       </details>

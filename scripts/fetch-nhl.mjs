@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -64,10 +64,14 @@ async function main() {
     }))
     .filter((t) => t.abbrev)
 
+  const currentOnly = process.argv.includes('--current')
+
   const now = new Date()
   const today = now.toISOString().slice(0, 10)
   const currentSeasonYear = now.getUTCMonth() + 1 >= 9 ? now.getUTCFullYear() : now.getUTCFullYear() - 1
-  const seasons = [currentSeasonYear - 2, currentSeasonYear - 1, currentSeasonYear]
+  const seasons = currentOnly
+    ? [currentSeasonYear]
+    : [currentSeasonYear - 2, currentSeasonYear - 1, currentSeasonYear]
 
   const all = []
   for (const year of seasons) {
@@ -77,7 +81,26 @@ async function main() {
     all.push(...games)
   }
 
-  const unique = new Map(all.map((g) => [`${g.date}_${g.home}_${g.away}_${g.hs}-${g.as}`, g]))
+  // В режиме --current прошлые сезоны берём из уже сохранённого файла (они неизменны).
+  let base = []
+  if (currentOnly) {
+    if (existsSync(OUT)) {
+      try {
+        const saved = JSON.parse(readFileSync(OUT, 'utf8'))
+        const curStart = `${currentSeasonYear}-09-01`
+        base = (saved.games ?? []).filter((g) => g.date < curStart)
+        console.log(`Из файла сохранено прошлых сезонов: ${base.length} матчей`)
+      } catch {
+        console.warn('Не удалось прочитать существующий games.json — прошлые сезоны не добавлены')
+      }
+    } else {
+      console.warn('games.json отсутствует — режим --current даст только текущий сезон')
+    }
+  }
+
+  const unique = new Map(
+    [...base, ...all].map((g) => [`${g.date}_${g.home}_${g.away}_${g.hs}-${g.as}`, g]),
+  )
   const games = [...unique.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 
   mkdirSync(dirname(OUT), { recursive: true })

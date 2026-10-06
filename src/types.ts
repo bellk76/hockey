@@ -21,6 +21,7 @@ export interface BacktestRow {
   outcome: string
   pHome: number
   pAway: number
+  pOver: number
 }
 
 export interface OddsRecord {

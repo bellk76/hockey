@@ -173,12 +173,12 @@ export function buildRatings(games: Game[], teams: TeamInfo[]): Ratings {
 
 function restDaysBefore(ratings: Ratings, team: string, date: string): number {
   const dates = ratings.lastGameDates[team] ?? []
-  let best = -1
+  let bestDate: string | null = null
   for (const d of dates) {
-    if (d < date && (best < 0 || d > dates[best])) best = dates.indexOf(d)
+    if (d < date && (bestDate === null || d > bestDate)) bestDate = d
   }
-  if (best < 0) return 3
-  return Math.min(14, daysBetween(dates[best], date))
+  if (bestDate === null) return 3
+  return Math.min(14, daysBetween(bestDate, date))
 }
 
 export function predictMatch(ratings: Ratings, home: string, away: string, date: string): Prediction {
@@ -191,14 +191,21 @@ export function predictMatch(ratings: Ratings, home: string, away: string, date:
   const tzDiff = Math.abs((TIMEZONE[home] ?? -5) - (TIMEZONE[away] ?? -5))
   const travelFactor = Math.max(0.9, 1 - 0.015 * tzDiff)
 
-  const lambdaHome = Math.max(0.2, leagueAvg * attack[home] * defense[away] * homeAdvantage * homeRest)
+  const attackHome = attack[home] ?? 1
+  const defenseHome = defense[home] ?? 1
+  const attackAway = attack[away] ?? 1
+  const defenseAway = defense[away] ?? 1
+
+  const lambdaHome = Math.max(0.2, leagueAvg * attackHome * defenseAway * homeAdvantage * homeRest)
   const lambdaAway = Math.max(
     0.2,
-    (leagueAvg * attack[away] * defense[home] * awayRest * travelFactor) / homeAdvantage,
+    (leagueAvg * attackAway * defenseHome * awayRest * travelFactor) / homeAdvantage,
   )
 
   const o = outcomeProbs(lambdaHome, lambdaAway)
-  const eloHome = 1 / (1 + 10 ** ((ratings.elo[away] - (ratings.elo[home] + HOME_ADV_ELO)) / 400))
+  const eloHomeRating = ratings.elo[home] ?? ELO_START
+  const eloAwayRating = ratings.elo[away] ?? ELO_START
+  const eloHome = 1 / (1 + 10 ** ((eloAwayRating - (eloHomeRating + HOME_ADV_ELO)) / 400))
 
   return {
     lambdaHome,
@@ -222,27 +229,58 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
   const elo: Record<string, number> = {}
   const gf: Record<string, number> = {}
   const ga: Record<string, number> = {}
-  const cnt: Record<string, number> = {}
+  const wsum: Record<string, number> = {}
   for (const t of teams) {
     elo[t.abbrev] = ELO_START
     gf[t.abbrev] = 0
     ga[t.abbrev] = 0
-    cnt[t.abbrev] = 0
+    wsum[t.abbrev] = 0
   }
   const lastGameWalk: Record<string, string> = {}
   const bucketGoals = { b2b: 0, rest2: 0, rested: 0 }
-  const bucketGames = { b2b: 0, rest2: 0, rested: 0 }
+  const bucketWeight = { b2b: 0, rest2: 0, rested: 0 }
 
-  let totalGoals = 0
-  let totalTeamGames = 0
-  let homeGoals = 0
-  let homeGames = 0
-  let awayGoals = 0
-  let awayGames = 0
+  let totalGoalsW = 0
+  let totalTeamGamesW = 0
+  let homeGoalsW = 0
+  let homeGamesW = 0
+  let awayGoalsW = 0
+  let awayGamesW = 0
   let currentSeason = 0
+  let asOf = ''
 
-  const sorted = [...games].sort((a, b) => (a.date < b.date ? -1 : 1))
+  const sorted = [...games].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
   const rows: BacktestRow[] = []
+
+  // Затухание накопленных сумм к дате матча — та же весовая модель (полураспад),
+  // что и в buildRatings, но с «точкой отсчёта» на каждый матч (честный walk-forward).
+  const decayTo = (date: string) => {
+    if (!asOf) {
+      asOf = date
+      return
+    }
+    const dd = daysBetween(asOf, date)
+    if (dd <= 0) return
+    const decay = 0.5 ** (dd / HALF_LIFE_DAYS)
+    for (const key of Object.keys(gf)) {
+      gf[key] *= decay
+      ga[key] *= decay
+      wsum[key] *= decay
+    }
+    totalGoalsW *= decay
+    totalTeamGamesW *= decay
+    homeGoalsW *= decay
+    homeGamesW *= decay
+    awayGoalsW *= decay
+    awayGamesW *= decay
+    bucketGoals.b2b *= decay
+    bucketGoals.rest2 *= decay
+    bucketGoals.rested *= decay
+    bucketWeight.b2b *= decay
+    bucketWeight.rest2 *= decay
+    bucketWeight.rested *= decay
+    asOf = date
+  }
 
   for (const g of sorted) {
     if (!(g.home in elo) || !(g.away in elo)) continue
@@ -252,21 +290,24 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
     }
     currentSeason = season
 
+    decayTo(g.date)
+
     let pHome = Number.NaN
     let pAway = Number.NaN
-    if (cnt[g.home] > 0 && cnt[g.away] > 0 && totalTeamGames > 0 && homeGames > 0 && awayGames > 0) {
-      const leagueAvg = totalGoals / totalTeamGames
-      const homeAdv = Math.sqrt(homeGoals / homeGames / (awayGoals / awayGames))
-      const attackHome = gf[g.home] / cnt[g.home] / leagueAvg
-      const defenseAway = ga[g.away] / cnt[g.away] / leagueAvg
-      const attackAway = gf[g.away] / cnt[g.away] / leagueAvg
-      const defenseHome = ga[g.home] / cnt[g.home] / leagueAvg
+    let pOver = Number.NaN
+    if (wsum[g.home] > 0 && wsum[g.away] > 0 && totalTeamGamesW > 0 && homeGamesW > 0 && awayGamesW > 0) {
+      const leagueAvg = totalGoalsW / totalTeamGamesW
+      const homeAdv = Math.sqrt(homeGoalsW / homeGamesW / (awayGoalsW / awayGamesW))
+      const attackHome = gf[g.home] / wsum[g.home] / leagueAvg
+      const defenseAway = ga[g.away] / wsum[g.away] / leagueAvg
+      const attackAway = gf[g.away] / wsum[g.away] / leagueAvg
+      const defenseHome = ga[g.home] / wsum[g.home] / leagueAvg
       const restHomeDays = lastGameWalk[g.home] ? Math.min(14, daysBetween(lastGameWalk[g.home], g.date)) : 3
       const restAwayDays = lastGameWalk[g.away] ? Math.min(14, daysBetween(lastGameWalk[g.away], g.date)) : 3
       const rf = {
-        b2b: bucketGames.b2b ? bucketGoals.b2b / bucketGames.b2b / leagueAvg : 1,
-        rest2: bucketGames.rest2 ? bucketGoals.rest2 / bucketGames.rest2 / leagueAvg : 1,
-        rested: bucketGames.rested ? bucketGoals.rested / bucketGames.rested / leagueAvg : 1,
+        b2b: bucketWeight.b2b ? bucketGoals.b2b / bucketWeight.b2b / leagueAvg : 1,
+        rest2: bucketWeight.rest2 ? bucketGoals.rest2 / bucketWeight.rest2 / leagueAvg : 1,
+        rested: bucketWeight.rested ? bucketGoals.rested / bucketWeight.rested / leagueAvg : 1,
       }
       const tzDiff = Math.abs((TIMEZONE[g.home] ?? -5) - (TIMEZONE[g.away] ?? -5))
       const travel = Math.max(0.9, 1 - 0.015 * tzDiff)
@@ -278,6 +319,7 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
       const o = outcomeProbs(lh, la)
       pHome = o.pHome + o.pDraw / 2
       pAway = o.pAway + o.pDraw / 2
+      pOver = o.pOver
     }
 
     rows.push({
@@ -289,6 +331,7 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
       outcome: g.outcome,
       pHome,
       pAway,
+      pOver,
     })
 
     const homeRated = elo[g.home] + HOME_ADV_ELO
@@ -301,21 +344,21 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
     ga[g.home] += g.as
     gf[g.away] += g.as
     ga[g.away] += g.hs
-    cnt[g.home] += 1
-    cnt[g.away] += 1
-    totalGoals += g.hs + g.as
-    totalTeamGames += 2
-    homeGoals += g.hs
-    homeGames += 1
-    awayGoals += g.as
-    awayGames += 1
+    wsum[g.home] += 1
+    wsum[g.away] += 1
+    totalGoalsW += g.hs + g.as
+    totalTeamGamesW += 2
+    homeGoalsW += g.hs
+    homeGamesW += 1
+    awayGoalsW += g.as
+    awayGamesW += 1
 
     for (const [team, scored] of [[g.home, g.hs], [g.away, g.as]] as const) {
       const prev = lastGameWalk[team]
       if (prev) {
         const bucket = restBucket(Math.min(14, daysBetween(prev, g.date)))
         bucketGoals[bucket] += scored
-        bucketGames[bucket] += 1
+        bucketWeight[bucket] += 1
       }
       lastGameWalk[team] = g.date
     }

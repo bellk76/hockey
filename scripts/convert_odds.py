@@ -45,14 +45,14 @@ def main():
     inputs = sys.argv[1:]
     if not inputs:
         sys.exit("укажите файлы выгрузки OddsHarvester")
-    with open(GAMES, encoding="utf-8") as f:
+    with open(GAMES, encoding="utf-8-sig") as f:
         games = json.load(f)
     name_to_abbrev = {norm(t["name"]): t["abbrev"] for t in games["teams"]}
 
     merged = {}
     unmatched = set()
     for path in inputs:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             records = json.load(f)
         for r in records:
             h = name_to_abbrev.get(norm(r["home_team"]))
@@ -86,10 +86,24 @@ def main():
                 rec["pOverMarket"] = round(ro / (ro + ru), 4)
                 rec["pUnderMarket"] = round(ru / (ro + ru), 4)
 
-    odds = sorted(merged.values(), key=lambda x: x["date"])
+    # Дополняем существующий odds.json: новые записи перезаписывают старые по (дата, команды),
+    # а ранее собранные (например, прошедшие матчи) сохраняются.
+    existing = {}
+    if os.path.exists(OUT):
+        try:
+            with open(OUT, encoding="utf-8-sig") as f:
+                for x in json.load(f).get("odds", []):
+                    existing[(x["date"], x["home"], x["away"])] = x
+        except Exception as e:
+            print("не удалось прочитать существующий odds.json:", e)
+    before = len(existing)
+    existing.update(merged)
+
+    odds = sorted(existing.values(), key=lambda x: x["date"])
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"odds": odds}, f)
-    print(f"записей: {len(odds)}; не сматчились: {sorted(unmatched) or 'нет'}")
+    print(f"новых из выгрузки: {len(merged)}; было: {before}; итого: {len(odds)}")
+    print("не сматчились:", sorted(unmatched) or "нет")
     print("->", OUT)
 
 

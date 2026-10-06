@@ -26,10 +26,15 @@ function clamp(value: number, lo: number, hi: number): number {
 }
 
 export const initialBank = clamp(read('bank', 1000), 0, 100_000_000)
-export const initialThreshold = clamp(read('ev2', 2), 0, 50)
+export const initialThreshold = clamp(read('ev2', 2), 0, 30)
 export const initialBasis = clamp(read('basis2', 0.5), 0, 1)
 export const initialMode = Math.round(clamp(read('mode2', 1), 0, 2))
-export const initialRisk = clamp(read('risk', 25), 1, 100)
+export const initialRisk = clamp(read('risk', 25), 5, 100)
+export const initialMinProb = clamp(read('minProb', 45), 0, 60)
+export const initialConfidence = clamp(read('conf', 65), 0, 90)
+export const initialAgree = Math.round(clamp(read('agree', 0), 0, 1))
+export const initialOddsMin = clamp(read('oddsMin2', 1.4), 1, 50)
+export const initialOddsMax = clamp(read('oddsMax2', 3), 1, 50)
 
 export function useSetting(initial: number, key: string) {
   const [value, setValue] = useState(initial)

@@ -11,7 +11,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "fetch:nhl": "node scripts/fetch-nhl.mjs"
+    "fetch:nhl": "node scripts/fetch-nhl.mjs",
+    "fetch:nhl:current": "node scripts/fetch-nhl.mjs --current"
   },
   "dependencies": {
     "react": "^19.2.8",

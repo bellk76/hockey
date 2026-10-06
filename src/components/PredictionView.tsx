@@ -113,18 +113,6 @@ export function PredictionView({
           <strong>{p.score}</strong>
         </div>
         <div>
-          <span className="label">Тотал (ожидаемо)</span>
-          <strong>{p.expectedTotal.toFixed(1)}</strong>
-        </div>
-        <div>
-          <span className="label">Больше 5.5</span>
-          <strong>{percent(p.pOver)}</strong>
-        </div>
-        <div>
-          <span className="label">Меньше 5.5</span>
-          <strong>{percent(1 - p.pOver)}</strong>
-        </div>
-        <div>
           <span className="label">Победа хозяев (Elo)</span>
           <strong>{percent(p.eloHome)}</strong>
         </div>

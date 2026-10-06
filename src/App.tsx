@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
 import { Bankroll } from './components/Bankroll'
+import { DataRefresh } from './components/DataRefresh'
 import { MatchList, type ListRow } from './components/MatchList'
 import { PredictionView } from './components/PredictionView'
 import raw from './data/games.json'
+import updated from './data/updated.json'
 import { buildRatings, predictMatch, walkForward } from './model/model'
 import { blend, findMarket, oddsData } from './model/odds'
 import type { Game, TeamInfo } from './types'
-import { initialBank, useSetting } from './utils/settings'
+import { initialBank, initialConfidence, useSetting } from './utils/settings'
 
 const dataset = raw as { generatedAt: string; teams: TeamInfo[]; games: Game[] }
 
@@ -15,6 +17,19 @@ const TODAY = (() => {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 })()
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10)
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
 
 function latestDate(games: Game[]): string {
   return games.reduce((max, g) => (g.date > max ? g.date : max), '2020-01-01')
@@ -34,6 +49,13 @@ export default function App() {
   const ratings = useMemo(() => buildRatings(dataset.games, dataset.teams), [])
   const rows = useMemo(() => walkForward(dataset.games, dataset.teams), [])
   const maxDate = useMemo(() => latestDate(dataset.games), [])
+  const seasonStart = useMemo(() => {
+    const [year, month] = TODAY.split('-').map(Number)
+    const seasonYear = month >= 9 ? year : year - 1
+    const prefix = `${seasonYear}-09-01`
+    const dates = dataset.games.map((g) => g.date).filter((d) => d >= prefix)
+    return dates.length ? dates.reduce((min, d) => (d < min ? d : min)) : maxDate
+  }, [maxDate])
 
   const [home, setHome] = useState(teams[0]?.abbrev ?? '')
   const [away, setAway] = useState(teams[1]?.abbrev ?? '')
@@ -42,6 +64,7 @@ export default function App() {
   const [oddsHome, setOddsHome] = useState('')
   const [oddsAway, setOddsAway] = useState('')
   const [bank, setBank] = useSetting(initialBank, 'bank')
+  const [confidence, setConfidence] = useSetting(initialConfidence, 'conf')
 
   const nameOf = (abbrev: string) => teams.find((t) => t.abbrev === abbrev)?.name ?? abbrev
   const sameTeam = home === away
@@ -70,24 +93,32 @@ export default function App() {
         }
       : null
 
-  const dayRows = useMemo(() => rows.filter((r) => r.date === date), [rows, date])
+  const seasonRows = useMemo(
+    () => rows.filter((r) => r.date >= seasonStart).sort((a, b) => (a.date < b.date ? 1 : -1)),
+    [rows, seasonStart],
+  )
 
   const upcoming = useMemo<ListRow[]>(() => {
     const seen = new Map<string, ListRow>()
     for (const o of oddsData) {
       if (o.date < TODAY) continue
-      seen.set(`${o.date}-${o.home}-${o.away}`, { date: o.date, home: o.home, away: o.away })
+      const p = predictMatch(ratings, o.home, o.away, o.date)
+      seen.set(`${o.date}-${o.home}-${o.away}`, {
+        date: o.date,
+        home: o.home,
+        away: o.away,
+        pHome: p.pHomeFinal,
+        pAway: p.pAwayFinal,
+      })
     }
     return [...seen.values()].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 15)
-  }, [])
+  }, [ratings])
 
   const bets = useMemo(
     () =>
       upcoming.flatMap((u) => {
         const m = findMarket(u.home, u.away, u.date)
-        if (!m || !m.oddsOver || !m.oddsUnder || m.pOverMarket === undefined || m.pUnderMarket === undefined) {
-          return []
-        }
+        if (!m || !m.oddsHome || !m.oddsAway || m.pHome === undefined || m.pAway === undefined) return []
         const p = predictMatch(ratings, u.home, u.away, u.date)
         const homeName = teams.find((t) => t.abbrev === u.home)?.name ?? u.home
         const awayName = teams.find((t) => t.abbrev === u.away)?.name ?? u.away
@@ -96,12 +127,12 @@ export default function App() {
             date: u.date,
             homeName,
             awayName,
-            pModelOver: p.pOver,
-            pModelUnder: 1 - p.pOver,
-            pMarketOver: m.pOverMarket,
-            pMarketUnder: m.pUnderMarket,
-            oddsOver: m.oddsOver,
-            oddsUnder: m.oddsUnder,
+            pModelH: p.pHomeFinal,
+            pModelA: p.pAwayFinal,
+            pMarketH: m.pHome,
+            pMarketA: m.pAway,
+            oddsHome: m.oddsHome,
+            oddsAway: m.oddsAway,
           },
         ]
       }),
@@ -167,9 +198,15 @@ export default function App() {
 
   const marketOf = (h: string, a: string, d: string) => {
     const m = findMarket(h, a, d)
-    return m && Number.isFinite(m.pHome) && Number.isFinite(m.pAway)
-      ? { pHome: m.pHome as number, pAway: m.pAway as number }
-      : null
+    if (!m) return null
+    const hasOutcome = Number.isFinite(m.pHome) && Number.isFinite(m.pAway)
+    const hasTotal = Number.isFinite(m.pOverMarket)
+    if (!hasOutcome && !hasTotal) return null
+    return {
+      pHome: hasOutcome ? (m.pHome as number) : undefined,
+      pAway: hasOutcome ? (m.pAway as number) : undefined,
+      pOver: hasTotal ? m.pOverMarket : undefined,
+    }
   }
 
   const select = (h: string, a: string, d: string) => {
@@ -178,10 +215,16 @@ export default function App() {
     setDate(d)
   }
 
-  const modelAccuracy = dayRows.filter(
-    (r) => Number.isFinite(r.pHome) && (r.pHome >= r.pAway ? 'home' : 'away') === (r.hs > r.as ? 'home' : 'away'),
+  const confidentRows = seasonRows.filter(
+    (r) =>
+      Number.isFinite(r.pHome) &&
+      Number.isFinite(r.pAway) &&
+      Math.round(Math.max(r.pHome, r.pAway) * 100) >= confidence,
+  )
+  const confidentCorrect = confidentRows.filter(
+    (r) => (r.pHome >= r.pAway ? 'home' : 'away') === (r.hs > r.as ? 'home' : 'away'),
   ).length
-  const playedCount = dayRows.filter((r) => Number.isFinite(r.pHome)).length
+
 
   return (
     <div className="app">
@@ -189,9 +232,11 @@ export default function App() {
         <h1>Hockey — прогноз матчей NHL</h1>
         <p className="caption">
           Данные: {dataset.games.length} матчей, {dataset.teams.length} команд · обновлено{' '}
-          {dataset.generatedAt.slice(0, 10)}
+          {updated.updatedAt ? formatDateTime(updated.updatedAt) : '—'}
         </p>
       </header>
+
+      <DataRefresh />
 
       <div className="controls">
         <label>
@@ -287,18 +332,28 @@ export default function App() {
       </section>
 
       <MatchList
-        title={`Матчи на ${date}`}
-        rows={dayRows}
+        title={`Матчи текущего сезона (с ${seasonStart})`}
+        rows={seasonRows}
         nameOf={nameOf}
         marketOf={marketOf}
         onSelect={select}
-        emptyText="В этот день матчей нет — выбери другую дату или матч из списка ниже."
+        emptyText="Нет сыгранных матчей текущего сезона."
+        fullDate
+        minConfidence={confidence / 100}
       />
-      {playedCount > 0 && (
+      {confidentRows.length > 0 && (
         <p className="caption summary">
-          Модель угадала исход в {modelAccuracy} из {playedCount} матчей этого дня. Клик по матчу — прогноз на него.
+          Среди матчей с уверенностью модели {confidence}% и выше исход угадан в {confidentCorrect} из{' '}
+          {confidentRows.length} ({Math.round((confidentCorrect / confidentRows.length) * 100)}%). Раскрой матч,
+          чтобы увидеть детали.
         </p>
       )}
+
+      <p className="caption">
+        Красная рамка ★ — самый уверенный матч игрового дня: модель и рынок согласны на фаворите, а уверенность
+        модели не ниже порога (по умолчанию 65%). Порог регулируется ползунком «Уверенность модели для
+        красной рамки» в «Дополнительных настройках» внизу.
+      </p>
 
       <MatchList
         title="Ближайшие матчи с кэфами"
@@ -307,9 +362,10 @@ export default function App() {
         marketOf={marketOf}
         onSelect={select}
         emptyText="Нет собранных ближайших матчей с кэфами."
+        minConfidence={confidence / 100}
       />
 
-      <Bankroll bets={bets} bank={bank} onBank={setBank} day={TODAY} />
+      <Bankroll bets={bets} bank={bank} onBank={setBank} day={TODAY} minConfidence={confidence} onMinConfidence={setConfidence} />
     </div>
   )
 }
