@@ -229,6 +229,9 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
     ga[t.abbrev] = 0
     cnt[t.abbrev] = 0
   }
+  const lastGameWalk: Record<string, string> = {}
+  const bucketGoals = { b2b: 0, rest2: 0, rested: 0 }
+  const bucketGames = { b2b: 0, rest2: 0, rested: 0 }
 
   let totalGoals = 0
   let totalTeamGames = 0
@@ -258,8 +261,20 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
       const defenseAway = ga[g.away] / cnt[g.away] / leagueAvg
       const attackAway = gf[g.away] / cnt[g.away] / leagueAvg
       const defenseHome = ga[g.home] / cnt[g.home] / leagueAvg
-      const lh = Math.max(0.2, leagueAvg * attackHome * defenseAway * homeAdv)
-      const la = Math.max(0.2, (leagueAvg * attackAway * defenseHome) / homeAdv)
+      const restHomeDays = lastGameWalk[g.home] ? Math.min(14, daysBetween(lastGameWalk[g.home], g.date)) : 3
+      const restAwayDays = lastGameWalk[g.away] ? Math.min(14, daysBetween(lastGameWalk[g.away], g.date)) : 3
+      const rf = {
+        b2b: bucketGames.b2b ? bucketGoals.b2b / bucketGames.b2b / leagueAvg : 1,
+        rest2: bucketGames.rest2 ? bucketGoals.rest2 / bucketGames.rest2 / leagueAvg : 1,
+        rested: bucketGames.rested ? bucketGoals.rested / bucketGames.rested / leagueAvg : 1,
+      }
+      const tzDiff = Math.abs((TIMEZONE[g.home] ?? -5) - (TIMEZONE[g.away] ?? -5))
+      const travel = Math.max(0.9, 1 - 0.015 * tzDiff)
+      const lh = Math.max(0.2, leagueAvg * attackHome * defenseAway * homeAdv * rf[restBucket(restHomeDays)])
+      const la = Math.max(
+        0.2,
+        (leagueAvg * attackAway * defenseHome * rf[restBucket(restAwayDays)] * travel) / homeAdv,
+      )
       const o = outcomeProbs(lh, la)
       pHome = o.pHome + o.pDraw / 2
       pAway = o.pAway + o.pDraw / 2
@@ -294,6 +309,16 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
     homeGames += 1
     awayGoals += g.as
     awayGames += 1
+
+    for (const [team, scored] of [[g.home, g.hs], [g.away, g.as]] as const) {
+      const prev = lastGameWalk[team]
+      if (prev) {
+        const bucket = restBucket(Math.min(14, daysBetween(prev, g.date)))
+        bucketGoals[bucket] += scored
+        bucketGames[bucket] += 1
+      }
+      lastGameWalk[team] = g.date
+    }
   }
 
   return rows

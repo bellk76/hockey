@@ -58,7 +58,7 @@ export default function App() {
       ? {
           pHome: auto.pHome as number,
           pAway: auto.pAway as number,
-          source: `${auto.books ?? 'рынок'} БК · ${auto.date}`,
+          source: auto.books ? `${auto.books} БК · ${auto.date}` : `рынок · ${auto.date}`,
         }
       : null
 

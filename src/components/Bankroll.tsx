@@ -127,8 +127,8 @@ function profitStats(stakes: Stake[]) {
     const lose = -s.stake
     const next = new Map<number, number>()
     for (const [value, prob] of dist) {
-      const w = Math.round((value + win) * 100) / 100
-      const l = Math.round((value + lose) * 100) / 100
+      const w = value + win
+      const l = value + lose
       next.set(w, (next.get(w) ?? 0) + prob * s.pBasis)
       next.set(l, (next.get(l) ?? 0) + prob * (1 - s.pBasis))
     }
@@ -295,7 +295,13 @@ export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
         return (
           <div className="bet" key={match}>
             <span className="bet-match">
-              {match} → <b>{info.side}</b>
+              {match}
+              {stake ? (
+                <>
+                  {' → '}
+                  <b>{info.side}</b>
+                </>
+              ) : null}
             </span>
             <span className="match-meta">
               <span>кэф {info.odds.toFixed(2)}</span>
@@ -303,7 +309,7 @@ export function Bankroll({ bets, bank, onBank, day }: BankrollProps) {
                 модель {(info.pModel * 100).toFixed(0)}% / рынок {(info.pMarket * 100).toFixed(0)}%
               </span>
               <span className={info.ev > 0 ? 'ok' : 'bad'}>EV {(info.ev * 100).toFixed(1)}%</span>
-              <span className={stake ? 'bet-stake' : 'skip'}>{stake ? `${stake} ₽` : 'пропуск'}</span>
+              <span className={stake ? 'bet-stake' : 'skip'}>{stake ? `${stake} ₽` : 'нет ставки'}</span>
             </span>
           </div>
         )
