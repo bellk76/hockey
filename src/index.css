@@ -242,6 +242,35 @@ input {
   margin-bottom: 0;
 }
 
+.match-day-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 4px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.match-day-summary::-webkit-details-marker {
+  display: none;
+}
+
+.match-day-date {
+  min-width: 92px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #344054;
+}
+
+.match-day-meta {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: #667085;
+}
+
 .match {
   display: block;
   width: 100%;

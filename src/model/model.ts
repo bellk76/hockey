@@ -1,10 +1,77 @@
 import type { BacktestRow, Game, Prediction, Ratings, TeamInfo } from '../types'
 
-const ELO_START = 1500
-const ELO_K = 8
-const HOME_ADV_ELO = 40
-const ELO_SEASON_REGRESSION = 0.75
-const HALF_LIFE_DAYS = 180
+export type StrengthSource = 'goals' | 'goals5' | 'corsi5' | 'xg5' | 'xgall'
+
+export interface ModelConfig {
+  eloStart: number
+  eloK: number
+  homeAdvElo: number
+  eloSeasonRegression: number
+  halfLifeDays: number
+  travelCoef: number
+  travelFloor: number
+  /** Сила регуляризации attack/defense к среднему лиги (в «псевдоматчах», 0 = выкл). */
+  priorGames: number
+  /** Поправка Dixon-Coles на низкие счета (0 = выкл). */
+  dixonColesRho: number
+  /** Доля ничьей в основное время, отнесённая хозяевам при разводе в ОТ/буллитах. */
+  otHomeShare: number
+  /** Что использовать для силы команд: голы, 5v5-голы или 5v5-броски (Corsi). */
+  strengthSource: StrengthSource
+  /** Вес Elo в итоговом исходе (0 = только Пуассон, 1 = только Elo). */
+  eloWeight: number
+  /** Калибровка итогового исхода: сжатие к 0.5 (1 = без изменений, <1 = мягче). */
+  probShrink: number
+}
+
+/** Агрегаты матча из play-by-play (src/data/advanced.json), индексируются по `${date}_${home}_${away}`. */
+export interface AdvancedGame {
+  h5g: number
+  a5g: number
+  h5c: number
+  a5c: number
+  h5x: number
+  a5x: number
+  hxa: number
+  axa: number
+}
+export type AdvancedIndex = Record<string, AdvancedGame>
+
+export function advancedKey(date: string, home: string, away: string): string {
+  return `${date}_${home}_${away}`
+}
+
+// Продвинутый источник (5v5/xG) используем, только если 5v5-данные покрывают
+// хотя бы половину матчей; иначе — надёжный откат на голы.
+function resolveSource(games: Game[], advanced: AdvancedIndex | undefined, cfg: ModelConfig): StrengthSource {
+  if (cfg.strengthSource === 'goals' || !advanced) return 'goals'
+  const covered = games.reduce((n, g) => n + (advanced[advancedKey(g.date, g.home, g.away)] ? 1 : 0), 0)
+  return covered >= Math.max(1, games.length * 0.5) ? cfg.strengthSource : 'goals'
+}
+
+function shrinkProb(p: number, s: number): number {
+  return Math.min(1, Math.max(0, 0.5 + s * (p - 0.5)))
+}
+
+export const defaultModelConfig: ModelConfig = {
+  eloStart: 1500,
+  eloK: 8,
+  homeAdvElo: 40,
+  eloSeasonRegression: 0.75,
+  // Подобрано тюнингом (scripts/tune.mjs). Для xG лучше короткая память (~2–3 месяца).
+  halfLifeDays: 90,
+  travelCoef: 0.015,
+  travelFloor: 0.9,
+  priorGames: 2,
+  dixonColesRho: 0,
+  otHomeShare: 0.5,
+  // Подобрано тюнингом: сила по 5v5-xG (координаты броска) даёт лучший Brier/log-loss.
+  strengthSource: 'xg5',
+  // Elo подмешивается к итоговому исходу (небольшой, но устойчивый плюс; помогает на старте).
+  eloWeight: 0.2,
+  probShrink: 1,
+}
+
 const MAX_GOALS = 15
 
 const TIMEZONE: Record<string, number> = {
@@ -46,7 +113,14 @@ interface Outcome {
   pOver: number
 }
 
-function outcomeProbs(lambdaHome: number, lambdaAway: number): Outcome {
+function outcomeProbs(lambdaHome: number, lambdaAway: number, rho = 0): Outcome {
+  const ph: number[] = []
+  const pa: number[] = []
+  for (let k = 0; k <= MAX_GOALS; k += 1) {
+    ph[k] = poisson(k, lambdaHome)
+    pa[k] = poisson(k, lambdaAway)
+  }
+
   let pHome = 0
   let pAway = 0
   let pDraw = 0
@@ -54,7 +128,14 @@ function outcomeProbs(lambdaHome: number, lambdaAway: number): Outcome {
   let best = { score: '0:0', prob: 0 }
   for (let i = 0; i <= MAX_GOALS; i += 1) {
     for (let j = 0; j <= MAX_GOALS; j += 1) {
-      const p = poisson(i, lambdaHome) * poisson(j, lambdaAway)
+      let p = ph[i] * pa[j]
+      if (rho !== 0) {
+        // Поправка Dixon-Coles на низкие счета.
+        if (i === 0 && j === 0) p *= 1 - lambdaHome * lambdaAway * rho
+        else if (i === 0 && j === 1) p *= 1 + lambdaHome * rho
+        else if (i === 1 && j === 0) p *= 1 + lambdaAway * rho
+        else if (i === 1 && j === 1) p *= 1 - rho
+      }
       if (i > j) pHome += p
       else if (i < j) pAway += p
       else pDraw += p
@@ -72,21 +153,30 @@ function outcomeProbs(lambdaHome: number, lambdaAway: number): Outcome {
   return { pHome, pAway, pDraw, score: best.score, expectedTotal: lambdaHome + lambdaAway, pOver }
 }
 
-export function buildRatings(games: Game[], teams: TeamInfo[]): Ratings {
+export function buildRatings(
+  games: Game[],
+  teams: TeamInfo[],
+  cfg: ModelConfig = defaultModelConfig,
+  advanced?: AdvancedIndex,
+): Ratings {
+  // Если продвинутых данных мало (нет покрытия матчей) — считаем силу по голам (откат).
+  const source = resolveSource(games, advanced, cfg)
   const elo: Record<string, number> = {}
   const lastGame: Record<string, string> = {}
   const lastGameDates: Record<string, string[]> = {}
   for (const t of teams) {
-    elo[t.abbrev] = ELO_START
+    elo[t.abbrev] = cfg.eloStart
     lastGameDates[t.abbrev] = []
   }
 
-  const sorted = [...games].sort((a, b) => (a.date < b.date ? -1 : 1))
+  const sorted = [...games].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
   const lastDate = sorted.length ? sorted[sorted.length - 1].date : '2020-01-01'
 
-  const goalsFor: Record<string, number> = {}
-  const goalsAgainst: Record<string, number> = {}
-  const weightSum: Record<string, number> = {}
+  const metricFor: Record<string, number> = {}
+  const metricAgainst: Record<string, number> = {}
+  const metricWeightSum: Record<string, number> = {}
+  let totalMetric = 0
+  let totalMetricWeight = 0
   const bucketGoals = { b2b: 0, rest2: 0, rested: 0 }
   const bucketGames = { b2b: 0, rest2: 0, rested: 0 }
   let weightedGoals = 0
@@ -104,24 +194,49 @@ export function buildRatings(games: Game[], teams: TeamInfo[]): Ratings {
     const season = seasonOf(g.date)
     if (season !== currentSeason) {
       for (const key of Object.keys(elo)) {
-        elo[key] = ELO_START + (elo[key] - ELO_START) * ELO_SEASON_REGRESSION
+        elo[key] = cfg.eloStart + (elo[key] - cfg.eloStart) * cfg.eloSeasonRegression
       }
       currentSeason = season
     }
 
-    const homeRated = elo[g.home] + HOME_ADV_ELO
+    const homeRated = elo[g.home] + cfg.homeAdvElo
     const expectedHome = 1 / (1 + 10 ** ((elo[g.away] - homeRated) / 400))
-    const delta = ELO_K * ((g.hs > g.as ? 1 : 0) - expectedHome)
+    const delta = cfg.eloK * ((g.hs > g.as ? 1 : 0) - expectedHome)
     elo[g.home] += delta
     elo[g.away] -= delta
 
-    const weight = 0.5 ** (daysBetween(g.date, lastDate) / HALF_LIFE_DAYS)
-    goalsFor[g.home] = (goalsFor[g.home] ?? 0) + g.hs * weight
-    goalsAgainst[g.home] = (goalsAgainst[g.home] ?? 0) + g.as * weight
-    goalsFor[g.away] = (goalsFor[g.away] ?? 0) + g.as * weight
-    goalsAgainst[g.away] = (goalsAgainst[g.away] ?? 0) + g.hs * weight
-    weightSum[g.home] = (weightSum[g.home] ?? 0) + weight
-    weightSum[g.away] = (weightSum[g.away] ?? 0) + weight
+    const weight = 0.5 ** (daysBetween(g.date, lastDate) / cfg.halfLifeDays)
+
+    const adv = source !== 'goals' ? advanced?.[advancedKey(g.date, g.home, g.away)] : undefined
+    let hasMetric = source === 'goals'
+    let mh = g.hs
+    let ma = g.as
+    if (adv) {
+      hasMetric = true
+      if (source === 'goals5') {
+        mh = adv.h5g
+        ma = adv.a5g
+      } else if (source === 'xg5') {
+        mh = adv.h5x
+        ma = adv.a5x
+      } else if (source === 'xgall') {
+        mh = adv.hxa
+        ma = adv.axa
+      } else {
+        mh = adv.h5c
+        ma = adv.a5c
+      }
+    }
+    if (hasMetric) {
+      metricFor[g.home] = (metricFor[g.home] ?? 0) + mh * weight
+      metricAgainst[g.home] = (metricAgainst[g.home] ?? 0) + ma * weight
+      metricFor[g.away] = (metricFor[g.away] ?? 0) + ma * weight
+      metricAgainst[g.away] = (metricAgainst[g.away] ?? 0) + mh * weight
+      metricWeightSum[g.home] = (metricWeightSum[g.home] ?? 0) + weight
+      metricWeightSum[g.away] = (metricWeightSum[g.away] ?? 0) + weight
+      totalMetric += (mh + ma) * weight
+      totalMetricWeight += 2 * weight
+    }
 
     weightedGoals += (g.hs + g.as) * weight
     weightedTeamGames += 2 * weight
@@ -143,12 +258,18 @@ export function buildRatings(games: Game[], teams: TeamInfo[]): Ratings {
   }
 
   const leagueAvg = weightedTeamGames > 0 ? weightedGoals / weightedTeamGames : 3
+  const metricMean = totalMetricWeight > 0 ? totalMetric / totalMetricWeight : leagueAvg
   const attack: Record<string, number> = {}
   const defense: Record<string, number> = {}
+  const prior = cfg.priorGames
   for (const t of teams) {
-    const w = weightSum[t.abbrev]
-    attack[t.abbrev] = w ? (goalsFor[t.abbrev] ?? 0) / w / leagueAvg : 1
-    defense[t.abbrev] = w ? (goalsAgainst[t.abbrev] ?? 0) / w / leagueAvg : 1
+    const w = (metricWeightSum[t.abbrev] ?? 0) + prior
+    attack[t.abbrev] = w
+      ? ((metricFor[t.abbrev] ?? 0) + prior * metricMean) / w / metricMean
+      : 1
+    defense[t.abbrev] = w
+      ? ((metricAgainst[t.abbrev] ?? 0) + prior * metricMean) / w / metricMean
+      : 1
   }
 
   const homeRatio = homeGames > 0 && awayGames > 0 ? homeGoals / homeGames / (awayGoals / awayGames) : 1
@@ -181,7 +302,13 @@ function restDaysBefore(ratings: Ratings, team: string, date: string): number {
   return Math.min(14, daysBetween(bestDate, date))
 }
 
-export function predictMatch(ratings: Ratings, home: string, away: string, date: string): Prediction {
+export function predictMatch(
+  ratings: Ratings,
+  home: string,
+  away: string,
+  date: string,
+  cfg: ModelConfig = defaultModelConfig,
+): Prediction {
   const { leagueAvg, attack, defense, homeAdvantage, restFactor } = ratings
   const restHome = restDaysBefore(ratings, home, date)
   const restAway = restDaysBefore(ratings, away, date)
@@ -189,7 +316,7 @@ export function predictMatch(ratings: Ratings, home: string, away: string, date:
   const awayRest = restFactor[restBucket(restAway)]
 
   const tzDiff = Math.abs((TIMEZONE[home] ?? -5) - (TIMEZONE[away] ?? -5))
-  const travelFactor = Math.max(0.9, 1 - 0.015 * tzDiff)
+  const travelFactor = Math.max(cfg.travelFloor, 1 - cfg.travelCoef * tzDiff)
 
   const attackHome = attack[home] ?? 1
   const defenseHome = defense[home] ?? 1
@@ -202,10 +329,17 @@ export function predictMatch(ratings: Ratings, home: string, away: string, date:
     (leagueAvg * attackAway * defenseHome * awayRest * travelFactor) / homeAdvantage,
   )
 
-  const o = outcomeProbs(lambdaHome, lambdaAway)
-  const eloHomeRating = ratings.elo[home] ?? ELO_START
-  const eloAwayRating = ratings.elo[away] ?? ELO_START
-  const eloHome = 1 / (1 + 10 ** ((eloAwayRating - (eloHomeRating + HOME_ADV_ELO)) / 400))
+  const o = outcomeProbs(lambdaHome, lambdaAway, cfg.dixonColesRho)
+  const eloHomeRating = ratings.elo[home] ?? cfg.eloStart
+  const eloAwayRating = ratings.elo[away] ?? cfg.eloStart
+  const eloHome = 1 / (1 + 10 ** ((eloAwayRating - (eloHomeRating + cfg.homeAdvElo)) / 400))
+
+  const pPoissonHome = o.pHome + o.pDraw * cfg.otHomeShare
+  const pPoissonAway = o.pAway + o.pDraw * (1 - cfg.otHomeShare)
+  const rawHome = (1 - cfg.eloWeight) * pPoissonHome + cfg.eloWeight * eloHome
+  const rawAway = (1 - cfg.eloWeight) * pPoissonAway + cfg.eloWeight * (1 - eloHome)
+  const pHomeFinal = shrinkProb(rawHome, cfg.probShrink)
+  const pAwayFinal = shrinkProb(rawAway, cfg.probShrink)
 
   return {
     lambdaHome,
@@ -213,8 +347,8 @@ export function predictMatch(ratings: Ratings, home: string, away: string, date:
     pHome: o.pHome,
     pAway: o.pAway,
     pDraw: o.pDraw,
-    pHomeFinal: o.pHome + o.pDraw / 2,
-    pAwayFinal: o.pAway + o.pDraw / 2,
+    pHomeFinal,
+    pAwayFinal,
     eloHome,
     score: o.score,
     expectedTotal: o.expectedTotal,
@@ -225,21 +359,31 @@ export function predictMatch(ratings: Ratings, home: string, away: string, date:
   }
 }
 
-export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
+export function walkForward(
+  games: Game[],
+  teams: TeamInfo[],
+  cfg: ModelConfig = defaultModelConfig,
+  advanced?: AdvancedIndex,
+): BacktestRow[] {
+  const source = resolveSource(games, advanced, cfg)
   const elo: Record<string, number> = {}
-  const gf: Record<string, number> = {}
-  const ga: Record<string, number> = {}
   const wsum: Record<string, number> = {}
+  const mf: Record<string, number> = {}
+  const ma: Record<string, number> = {}
+  const mwsum: Record<string, number> = {}
   for (const t of teams) {
-    elo[t.abbrev] = ELO_START
-    gf[t.abbrev] = 0
-    ga[t.abbrev] = 0
+    elo[t.abbrev] = cfg.eloStart
     wsum[t.abbrev] = 0
+    mf[t.abbrev] = 0
+    ma[t.abbrev] = 0
+    mwsum[t.abbrev] = 0
   }
   const lastGameWalk: Record<string, string> = {}
   const bucketGoals = { b2b: 0, rest2: 0, rested: 0 }
   const bucketWeight = { b2b: 0, rest2: 0, rested: 0 }
 
+  let totalMetricW = 0
+  let totalMetricWeightW = 0
   let totalGoalsW = 0
   let totalTeamGamesW = 0
   let homeGoalsW = 0
@@ -251,6 +395,7 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
 
   const sorted = [...games].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
   const rows: BacktestRow[] = []
+  const prior = cfg.priorGames
 
   // Затухание накопленных сумм к дате матча — та же весовая модель (полураспад),
   // что и в buildRatings, но с «точкой отсчёта» на каждый матч (честный walk-forward).
@@ -261,12 +406,15 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
     }
     const dd = daysBetween(asOf, date)
     if (dd <= 0) return
-    const decay = 0.5 ** (dd / HALF_LIFE_DAYS)
-    for (const key of Object.keys(gf)) {
-      gf[key] *= decay
-      ga[key] *= decay
+    const decay = 0.5 ** (dd / cfg.halfLifeDays)
+    for (const key of Object.keys(mf)) {
       wsum[key] *= decay
+      mf[key] *= decay
+      ma[key] *= decay
+      mwsum[key] *= decay
     }
+    totalMetricW *= decay
+    totalMetricWeightW *= decay
     totalGoalsW *= decay
     totalTeamGamesW *= decay
     homeGoalsW *= decay
@@ -286,7 +434,7 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
     if (!(g.home in elo) || !(g.away in elo)) continue
     const season = seasonOf(g.date)
     if (currentSeason !== 0 && season !== currentSeason) {
-      for (const key of Object.keys(elo)) elo[key] = ELO_START + (elo[key] - ELO_START) * ELO_SEASON_REGRESSION
+      for (const key of Object.keys(elo)) elo[key] = cfg.eloStart + (elo[key] - cfg.eloStart) * cfg.eloSeasonRegression
     }
     currentSeason = season
 
@@ -295,13 +443,24 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
     let pHome = Number.NaN
     let pAway = Number.NaN
     let pOver = Number.NaN
-    if (wsum[g.home] > 0 && wsum[g.away] > 0 && totalTeamGamesW > 0 && homeGamesW > 0 && awayGamesW > 0) {
+    if (
+      wsum[g.home] > 0 &&
+      wsum[g.away] > 0 &&
+      mwsum[g.home] + prior > 0 &&
+      mwsum[g.away] + prior > 0 &&
+      totalTeamGamesW > 0 &&
+      homeGamesW > 0 &&
+      awayGamesW > 0
+    ) {
       const leagueAvg = totalGoalsW / totalTeamGamesW
+      const metricMean = totalMetricWeightW > 0 ? totalMetricW / totalMetricWeightW : leagueAvg
       const homeAdv = Math.sqrt(homeGoalsW / homeGamesW / (awayGoalsW / awayGamesW))
-      const attackHome = gf[g.home] / wsum[g.home] / leagueAvg
-      const defenseAway = ga[g.away] / wsum[g.away] / leagueAvg
-      const attackAway = gf[g.away] / wsum[g.away] / leagueAvg
-      const defenseHome = ga[g.home] / wsum[g.home] / leagueAvg
+      const wHome = mwsum[g.home] + prior
+      const wAway = mwsum[g.away] + prior
+      const attackHome = ((mf[g.home] + prior * metricMean) / wHome) / metricMean
+      const defenseAway = ((ma[g.away] + prior * metricMean) / wAway) / metricMean
+      const attackAway = ((mf[g.away] + prior * metricMean) / wAway) / metricMean
+      const defenseHome = ((ma[g.home] + prior * metricMean) / wHome) / metricMean
       const restHomeDays = lastGameWalk[g.home] ? Math.min(14, daysBetween(lastGameWalk[g.home], g.date)) : 3
       const restAwayDays = lastGameWalk[g.away] ? Math.min(14, daysBetween(lastGameWalk[g.away], g.date)) : 3
       const rf = {
@@ -310,15 +469,20 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
         rested: bucketWeight.rested ? bucketGoals.rested / bucketWeight.rested / leagueAvg : 1,
       }
       const tzDiff = Math.abs((TIMEZONE[g.home] ?? -5) - (TIMEZONE[g.away] ?? -5))
-      const travel = Math.max(0.9, 1 - 0.015 * tzDiff)
+      const travel = Math.max(cfg.travelFloor, 1 - cfg.travelCoef * tzDiff)
       const lh = Math.max(0.2, leagueAvg * attackHome * defenseAway * homeAdv * rf[restBucket(restHomeDays)])
       const la = Math.max(
         0.2,
         (leagueAvg * attackAway * defenseHome * rf[restBucket(restAwayDays)] * travel) / homeAdv,
       )
-      const o = outcomeProbs(lh, la)
-      pHome = o.pHome + o.pDraw / 2
-      pAway = o.pAway + o.pDraw / 2
+      const o = outcomeProbs(lh, la, cfg.dixonColesRho)
+      const eloHomeP = 1 / (1 + 10 ** ((elo[g.away] - (elo[g.home] + cfg.homeAdvElo)) / 400))
+      const pPoissonHome = o.pHome + o.pDraw * cfg.otHomeShare
+      const pPoissonAway = o.pAway + o.pDraw * (1 - cfg.otHomeShare)
+      const rawHome = (1 - cfg.eloWeight) * pPoissonHome + cfg.eloWeight * eloHomeP
+      const rawAway = (1 - cfg.eloWeight) * pPoissonAway + cfg.eloWeight * (1 - eloHomeP)
+      pHome = shrinkProb(rawHome, cfg.probShrink)
+      pAway = shrinkProb(rawAway, cfg.probShrink)
       pOver = o.pOver
     }
 
@@ -334,18 +498,46 @@ export function walkForward(games: Game[], teams: TeamInfo[]): BacktestRow[] {
       pOver,
     })
 
-    const homeRated = elo[g.home] + HOME_ADV_ELO
+    const homeRated = elo[g.home] + cfg.homeAdvElo
     const expectedHome = 1 / (1 + 10 ** ((elo[g.away] - homeRated) / 400))
-    const delta = ELO_K * ((g.hs > g.as ? 1 : 0) - expectedHome)
+    const delta = cfg.eloK * ((g.hs > g.as ? 1 : 0) - expectedHome)
     elo[g.home] += delta
     elo[g.away] -= delta
 
-    gf[g.home] += g.hs
-    ga[g.home] += g.as
-    gf[g.away] += g.as
-    ga[g.away] += g.hs
     wsum[g.home] += 1
     wsum[g.away] += 1
+
+    const adv = source !== 'goals' ? advanced?.[advancedKey(g.date, g.home, g.away)] : undefined
+    let hasMetric = source === 'goals'
+    let mvHome = g.hs
+    let mvAway = g.as
+    if (adv) {
+      hasMetric = true
+      if (source === 'goals5') {
+        mvHome = adv.h5g
+        mvAway = adv.a5g
+      } else if (source === 'xg5') {
+        mvHome = adv.h5x
+        mvAway = adv.a5x
+      } else if (source === 'xgall') {
+        mvHome = adv.hxa
+        mvAway = adv.axa
+      } else {
+        mvHome = adv.h5c
+        mvAway = adv.a5c
+      }
+    }
+    if (hasMetric) {
+      mf[g.home] += mvHome
+      ma[g.home] += mvAway
+      mf[g.away] += mvAway
+      ma[g.away] += mvHome
+      mwsum[g.home] += 1
+      mwsum[g.away] += 1
+      totalMetricW += mvHome + mvAway
+      totalMetricWeightW += 2
+    }
+
     totalGoalsW += g.hs + g.as
     totalTeamGamesW += 2
     homeGoalsW += g.hs

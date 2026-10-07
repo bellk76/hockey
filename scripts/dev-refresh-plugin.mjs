@@ -141,6 +141,14 @@ export function dataRefresh() {
             return
           }
 
+          // 1b. Продвинутая статистика 5v5 — необязательная фаза
+          try {
+            send({ type: 'phase', phase: 'Статистика 5v5', percent: 25 })
+            await run('node', ['scripts/fetch-advanced.mjs', '--current'], root, log)
+          } catch (e) {
+            send({ type: 'warn', message: `Матчи обновлены. 5v5-статистику собрать не удалось: ${String(e?.message || e)}` })
+          }
+
           // 2. Коэффициенты — необязательная фаза (Oddsportal часто блокирует сбор)
           try {
             send({ type: 'phase', phase: 'Коэффициенты', percent: 45 })

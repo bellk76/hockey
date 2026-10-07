@@ -1,16 +1,47 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bankroll } from './components/Bankroll'
 import { DataRefresh } from './components/DataRefresh'
 import { MatchList, type ListRow } from './components/MatchList'
 import { PredictionView } from './components/PredictionView'
+import advancedRaw from './data/advanced.json'
 import raw from './data/games.json'
+import scheduleRaw from './data/schedule.json'
 import updated from './data/updated.json'
-import { buildRatings, predictMatch, walkForward } from './model/model'
+import { advancedKey, buildRatings, predictMatch, walkForward, type AdvancedIndex } from './model/model'
 import { blend, findMarket, oddsData } from './model/odds'
-import type { Game, TeamInfo } from './types'
+import type { Game, ScheduledGame, TeamInfo } from './types'
+import { readPicks, writePicks } from './utils/picks'
 import { initialBank, initialConfidence, useSetting } from './utils/settings'
 
 const dataset = raw as { generatedAt: string; teams: TeamInfo[]; games: Game[] }
+const schedule = scheduleRaw as { generatedAt: string; games: ScheduledGame[] }
+
+const advancedIndex: AdvancedIndex = {}
+type AdvancedRow = {
+  date: string
+  home: string
+  away: string
+  h5g: number
+  a5g: number
+  h5c: number
+  a5c: number
+  h5x: number
+  a5x: number
+  hxa: number
+  axa: number
+}
+for (const g of (advancedRaw as { games: AdvancedRow[] }).games) {
+  advancedIndex[advancedKey(g.date, g.home, g.away)] = {
+    h5g: g.h5g,
+    a5g: g.a5g,
+    h5c: g.h5c,
+    a5c: g.a5c,
+    h5x: g.h5x,
+    a5x: g.a5x,
+    hxa: g.hxa,
+    axa: g.axa,
+  }
+}
 
 const TODAY = (() => {
   const d = new Date()
@@ -46,8 +77,8 @@ function marketFromOdds(homeOdd: string, awayOdd: string) {
 
 export default function App() {
   const teams = useMemo(() => [...dataset.teams].sort((a, b) => a.name.localeCompare(b.name)), [])
-  const ratings = useMemo(() => buildRatings(dataset.games, dataset.teams), [])
-  const rows = useMemo(() => walkForward(dataset.games, dataset.teams), [])
+  const ratings = useMemo(() => buildRatings(dataset.games, dataset.teams, undefined, advancedIndex), [])
+  const rows = useMemo(() => walkForward(dataset.games, dataset.teams, undefined, advancedIndex), [])
   const maxDate = useMemo(() => latestDate(dataset.games), [])
   const seasonStart = useMemo(() => {
     const [year, month] = TODAY.split('-').map(Number)
@@ -98,21 +129,37 @@ export default function App() {
     [rows, seasonStart],
   )
 
+  const playedByTeams = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const g of dataset.games) {
+      const key = `${g.home}-${g.away}`
+      const dates = map.get(key) ?? []
+      dates.push(g.date)
+      map.set(key, dates)
+    }
+    return map
+  }, [])
+
   const upcoming = useMemo<ListRow[]>(() => {
     const seen = new Map<string, ListRow>()
-    for (const o of oddsData) {
-      if (o.date < TODAY) continue
-      const p = predictMatch(ratings, o.home, o.away, o.date)
-      seen.set(`${o.date}-${o.home}-${o.away}`, {
-        date: o.date,
-        home: o.home,
-        away: o.away,
+    // Группируем по календарю NHL (schedule.json), а не по датам кэфов: у Oddsportal
+    // дата сдвинута часовым поясом (Europe/Rome), и поздние матчи уезжают на сутки вперёд.
+    for (const s of schedule.games) {
+      if (s.date < TODAY) continue
+      // Матч уже с результатом (schedule.json мог быть собран раньше) — в предстоящие не берём.
+      const played = playedByTeams.get(`${s.home}-${s.away}`)
+      if (played?.includes(s.date)) continue
+      const p = predictMatch(ratings, s.home, s.away, s.date)
+      seen.set(`${s.date}-${s.home}-${s.away}`, {
+        date: s.date,
+        home: s.home,
+        away: s.away,
         pHome: p.pHomeFinal,
         pAway: p.pAwayFinal,
       })
     }
     return [...seen.values()].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 15)
-  }, [ratings])
+  }, [ratings, playedByTeams])
 
   const bets = useMemo(
     () =>
@@ -196,7 +243,7 @@ export default function App() {
     }
   }, [rows])
 
-  const marketOf = (h: string, a: string, d: string) => {
+  const marketOf = useCallback((h: string, a: string, d: string) => {
     const m = findMarket(h, a, d)
     if (!m) return null
     const hasOutcome = Number.isFinite(m.pHome) && Number.isFinite(m.pAway)
@@ -207,7 +254,51 @@ export default function App() {
       pAway: hasOutcome ? (m.pAway as number) : undefined,
       pOver: hasTotal ? m.pOverMarket : undefined,
     }
-  }
+  }, [])
+
+  // «Суперматч дня» (рамка + ★). В предстоящих считается каждый раз; когда матч
+  // становится прошедшим, выбор берётся из сохранённого — рамка «переезжает».
+  const [initialPicks] = useState(readPicks)
+  const picks = useMemo(() => {
+    const next: Record<string, string> = { ...initialPicks }
+    const bestOfDay = (list: ListRow[], date: string): string | null => {
+      let best: string | null = null
+      let bestProb = -1
+      for (const r of list) {
+        if (r.date !== date) continue
+        if (!Number.isFinite(r.pHome) || !Number.isFinite(r.pAway)) continue
+        const m = marketOf(r.home, r.away, r.date)
+        if (!m || !Number.isFinite(m.pHome) || !Number.isFinite(m.pAway)) continue
+        const modelFav = (r.pHome as number) >= (r.pAway as number) ? 'home' : 'away'
+        const marketFav = (m.pHome as number) >= (m.pAway as number) ? 'home' : 'away'
+        if (modelFav !== marketFav) continue
+        const p = Math.max(r.pHome as number, (r.pAway ?? 0) as number)
+        if (Math.round(p * 100) >= confidence && p > bestProb) {
+          bestProb = p
+          best = `${r.home}-${r.away}`
+        }
+      }
+      return best
+    }
+
+    for (const date of new Set(upcoming.map((u) => u.date))) {
+      const key = bestOfDay(upcoming, date)
+      if (key) next[date] = key
+      else delete next[date]
+    }
+    for (const date of new Set(seasonRows.map((r) => r.date))) {
+      if (next[date]) continue
+      const key = bestOfDay(seasonRows, date)
+      if (key) next[date] = key
+    }
+    return next
+  }, [upcoming, seasonRows, marketOf, confidence, initialPicks])
+
+  useEffect(() => {
+    writePicks(picks)
+  }, [picks])
+
+  const bestOf = useCallback((date: string) => picks[date] ?? null, [picks])
 
   const select = (h: string, a: string, d: string) => {
     setHome(h)
@@ -339,6 +430,8 @@ export default function App() {
         onSelect={select}
         emptyText="Нет сыгранных матчей текущего сезона."
         fullDate
+        collapsibleDays
+        bestOf={bestOf}
         minConfidence={confidence / 100}
       />
       {confidentRows.length > 0 && (
@@ -352,16 +445,18 @@ export default function App() {
       <p className="caption">
         Красная рамка ★ — самый уверенный матч игрового дня: модель и рынок согласны на фаворите, а уверенность
         модели не ниже порога (по умолчанию 65%). Порог регулируется ползунком «Уверенность модели для
-        красной рамки» в «Дополнительных настройках» внизу.
+        красной рамки» в «Дополнительных настройках» внизу. В «Ближайших» рамка считается заново, а когда матч
+        становится сыгранным — сохраняется за ним, чтобы видеть, угадан ли прогноз на «суперматч».
       </p>
 
       <MatchList
-        title="Ближайшие матчи с кэфами"
+        title="Ближайшие матчи"
         rows={upcoming}
         nameOf={nameOf}
         marketOf={marketOf}
         onSelect={select}
-        emptyText="Нет собранных ближайших матчей с кэфами."
+        emptyText="Нет предстоящих матчей."
+        bestOf={bestOf}
         minConfidence={confidence / 100}
       />
 

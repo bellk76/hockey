@@ -1,4 +1,5 @@
 export interface Game {
+  id?: string
   date: string
   home: string
   away: string
@@ -10,6 +11,12 @@ export interface Game {
 export interface TeamInfo {
   abbrev: string
   name: string
+}
+
+export interface ScheduledGame {
+  date: string
+  home: string
+  away: string
 }
 
 export interface BacktestRow {

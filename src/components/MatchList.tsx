@@ -22,6 +22,8 @@ interface MatchListProps {
   emptyText: string
   fullDate?: boolean
   minConfidence?: number
+  collapsibleDays?: boolean
+  bestOf?: (date: string) => string | null
 }
 
 function outcomeLabel(outcome?: string): string {
@@ -38,7 +40,26 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(0)}%`
 }
 
-export function MatchList({ title, rows, nameOf, marketOf, onSelect, emptyText, fullDate, minConfidence }: MatchListProps) {
+function plural(n: number, forms: [string, string, string]): string {
+  const n10 = n % 10
+  const n100 = n % 100
+  if (n10 === 1 && n100 !== 11) return forms[0]
+  if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return forms[1]
+  return forms[2]
+}
+
+export function MatchList({
+  title,
+  rows,
+  nameOf,
+  marketOf,
+  onSelect,
+  emptyText,
+  fullDate,
+  minConfidence,
+  collapsibleDays,
+  bestOf,
+}: MatchListProps) {
   const byDate = new Map<string, ListRow[]>()
   for (const r of rows) {
     const list = byDate.get(r.date) ?? []
@@ -46,7 +67,7 @@ export function MatchList({ title, rows, nameOf, marketOf, onSelect, emptyText, 
     byDate.set(r.date, list)
   }
 
-  const renderMatch = (r: ListRow, isBest: boolean) => {
+  const renderMatch = (r: ListRow, isBest: boolean, showDate: boolean) => {
     const key = `${r.date}-${r.home}-${r.away}`
     const played = r.hs !== undefined && r.as !== undefined
     const winner = played ? (r.hs! > r.as! ? 'home' : 'away') : null
@@ -70,7 +91,7 @@ export function MatchList({ title, rows, nameOf, marketOf, onSelect, emptyText, 
     return (
       <details key={key} className={`match${isBest ? ' best' : ''}`}>
         <summary className="match-summary">
-          <span className="match-date">{fullDate ? r.date : r.date.slice(5)}</span>
+          {showDate && <span className="match-date">{fullDate ? r.date : r.date.slice(5)}</span>}
           <span className="match-teams">
             <span className="team home">{nameOf(r.home)}</span>
             <span className="score">
@@ -113,27 +134,70 @@ export function MatchList({ title, rows, nameOf, marketOf, onSelect, emptyText, 
     <section className="matches">
       <h2>{title}</h2>
       {rows.length === 0 && <p className="caption">{emptyText}</p>}
-      {[...byDate.entries()].map(([day, dayRows]) => {
+      {[...byDate.entries()].map(([day, dayRows], dayIndex) => {
         const min = minConfidence ?? 0
-        let bestKey: string | null = null
+        let bestKey: string | null = bestOf ? bestOf(day) : null
         let bestProb = -1
+        let modelTotal = 0
+        let modelCorrect = 0
+        let marketTotal = 0
+        let marketCorrect = 0
         for (const r of dayRows) {
-          if (!Number.isFinite(r.pHome)) continue
+          const played = r.hs !== undefined && r.as !== undefined
+          const winner = played ? (r.hs! > r.as! ? 'home' : 'away') : null
+          const hasModel = Number.isFinite(r.pHome) && Number.isFinite(r.pAway)
           const m = marketOf(r.home, r.away, r.date)
-          if (!m || !Number.isFinite(m.pHome) || !Number.isFinite(m.pAway)) continue
+          const hasMarket = !!m && Number.isFinite(m.pHome) && Number.isFinite(m.pAway)
+          if (played && hasModel) {
+            modelTotal += 1
+            if (favourite(r.pHome!, r.pAway!) === winner) modelCorrect += 1
+          }
+          if (played && hasMarket) {
+            marketTotal += 1
+            if (favourite(m!.pHome as number, m!.pAway as number) === winner) marketCorrect += 1
+          }
+          if (bestOf || !hasModel || !hasMarket) continue
           const modelFav = (r.pHome as number) >= (r.pAway as number) ? 'home' : 'away'
-          const marketFav = (m.pHome as number) >= (m.pAway as number) ? 'home' : 'away'
+          const marketFav = (m!.pHome as number) >= (m!.pAway as number) ? 'home' : 'away'
           if (modelFav !== marketFav) continue
           const p = Math.max(r.pHome as number, (r.pAway ?? 0) as number)
           if (Math.round(p * 100) >= Math.round(min * 100) && p > bestProb) {
             bestProb = p
-            bestKey = `${r.date}-${r.home}-${r.away}`
+            bestKey = `${r.home}-${r.away}`
           }
         }
+        const body = dayRows.map((r) => renderMatch(r, `${r.home}-${r.away}` === bestKey, !collapsibleDays))
+        if (!collapsibleDays) {
+          return (
+            <div key={day} className="match-day">
+              {body}
+            </div>
+          )
+        }
+        const n = dayRows.length
         return (
-          <div key={day} className="match-day">
-            {dayRows.map((r) => renderMatch(r, `${r.date}-${r.home}-${r.away}` === bestKey))}
-          </div>
+          <details key={day} className="match-day" open={dayIndex < 3}>
+            <summary className="match-day-summary">
+              <span className="match-day-date">{fullDate ? day : day.slice(5)}</span>
+              <span className="match-day-meta">
+                <span>
+                  {n} {plural(n, ['матч', 'матча', 'матчей'])}
+                </span>
+                {modelTotal > 0 && (
+                  <span>
+                    модель {modelCorrect}/{modelTotal}
+                  </span>
+                )}
+                {marketTotal > 0 && (
+                  <span>
+                    рынок {marketCorrect}/{marketTotal}
+                  </span>
+                )}
+              </span>
+              {bestKey && <span className="best-badge">★</span>}
+            </summary>
+            {body}
+          </details>
         )
       })}
     </section>

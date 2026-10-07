@@ -7,6 +7,7 @@ const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, '..', 'src', 'data', 'games.json')
+const OUT_SCHEDULE = join(here, '..', 'src', 'data', 'schedule.json')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -38,6 +39,7 @@ async function collectSeason(startYear, endDate) {
         const as = g.awayTeam?.score
         if (!home || !away || hs == null || as == null) continue
         games.set(String(g.id), {
+          id: String(g.id),
           date: week.date,
           home,
           away,
@@ -53,6 +55,34 @@ async function collectSeason(startYear, endDate) {
     await sleep(120)
   }
   return [...games.values()]
+}
+
+// Предстоящие матчи (ещё не завершённые). Дата берётся из календаря NHL, а не из
+// кэфов Oddsportal — у Oddsportal дата сдвинута на часовой пояс (Europe/Rome).
+async function collectUpcoming(startDate, endDate) {
+  const games = new Map()
+  let date = startDate
+  let guard = 0
+  while (date && guard < 80) {
+    guard += 1
+    const data = await getJson(`${BASE}/schedule/${date}`)
+    if (!data) break
+    for (const week of data.gameWeek ?? []) {
+      for (const g of week.games ?? []) {
+        if (g.gameState === 'OFF') continue
+        if (g.gameType === 1) continue
+        const home = g.homeTeam?.abbrev
+        const away = g.awayTeam?.abbrev
+        if (!home || !away) continue
+        games.set(`${week.date}_${home}_${away}`, { date: week.date, home, away })
+      }
+    }
+    const next = data.nextStartDate
+    if (!next || next > endDate) break
+    date = next
+    await sleep(120)
+  }
+  return [...games.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 }
 
 async function main() {
@@ -98,14 +128,22 @@ async function main() {
     }
   }
 
+  const clubAbbrevs = new Set(teams.map((t) => t.abbrev))
   const unique = new Map(
     [...base, ...all].map((g) => [`${g.date}_${g.home}_${g.away}_${g.hs}-${g.as}`, g]),
   )
-  const games = [...unique.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  const games = [...unique.values()]
+    // Только клубные матчи NHL (отсекаем турниры типа 4 Nations: SWE/CAN/FIN/USA).
+    .filter((g) => clubAbbrevs.has(g.home) && clubAbbrevs.has(g.away))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 
   mkdirSync(dirname(OUT), { recursive: true })
   writeFileSync(OUT, JSON.stringify({ generatedAt: new Date().toISOString(), teams, games }))
   console.log(`Итого: ${games.length} матчей, ${teams.length} команд -> ${OUT}`)
+
+  const upcoming = await collectUpcoming(today, `${currentSeasonYear + 1}-08-01`)
+  writeFileSync(OUT_SCHEDULE, JSON.stringify({ generatedAt: new Date().toISOString(), games: upcoming }))
+  console.log(`Предстоящие: ${upcoming.length} матчей -> ${OUT_SCHEDULE}`)
 }
 
 main().catch((e) => {

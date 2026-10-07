@@ -11,8 +11,11 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
+    "tune": "node scripts/tune.mjs",
     "fetch:nhl": "node scripts/fetch-nhl.mjs",
-    "fetch:nhl:current": "node scripts/fetch-nhl.mjs --current"
+    "fetch:nhl:current": "node scripts/fetch-nhl.mjs --current",
+    "fetch:advanced": "node scripts/fetch-advanced.mjs",
+    "fetch:advanced:current": "node scripts/fetch-advanced.mjs --current"
   },
   "dependencies": {
     "react": "^19.2.8",

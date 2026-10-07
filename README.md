@@ -9,12 +9,17 @@
 Схема: **данные → модель → рынок → купон**.
 
 1. **Данные.** `src/data/games.json` — результаты матчей NHL (2 прошлых сезона + текущий)
-   с открытого API `api-web.nhle.com`. `src/data/odds.json` — коэффициенты букмекеров с
+   с открытого API `api-web.nhle.com`. `src/data/schedule.json` — предстоящие матчи (календарь
+   NHL, ещё не завершённые). `src/data/advanced.json` — статистика 5v5 (голы и броски/Corsi)
+   из play-by-play NHL. `src/data/odds.json` — коэффициенты букмекеров с
    Oddsportal (собраны через [OddsHarvester](https://github.com/jordantete/OddsHarvester)).
 2. **Модель** (`src/model/model.ts`):
    - **Elo** — рейтинги силы команд, домашнее преимущество, регрессия к среднему в новом сезоне;
-   - **Пуассон** — силы атаки/защиты по забитым/пропущенным с весом свежести (полураспад 180 дней),
-     отсюда вероятности исходов, вероятный счёт и тотал;
+     итоговый исход — ансамбль Пуассона и Elo (вес `eloWeight`);
+   - **Пуассон** — силы атаки/защиты с весом свежести (полураспад 90 дней) и лёгкой регуляризацией
+     к среднему лиги (shrinkage). Сила считается по **xG в равных составах (5v5)** —
+     по координатам броска (дистанция/защита), это устойчивее голов; отсюда вероятности исходов,
+     вероятный счёт и тотал;
    - **дни отдыха** и **разница часовых поясов** (фактор перелёта) корректируют λ голов;
    - **walk-forward бэктест** и метрики **Brier** / **log-loss** (модель против рынка).
      Walk-forward считается **той же взвешенной моделью**, что и боевой прогноз
@@ -22,6 +27,8 @@
 3. **Рынок.** Если для пары команд есть кэфы, показываются вероятности по рынку и их
    **блендинг** с моделью (ползунок «вес рынка»).
 4. **Списки матчей** (`src/components/MatchList.tsx`). Матчи сгруппированы по игровым дням.
+   «Ближайшие матчи» строятся по календарю NHL (`schedule.json`), а кэф подтягивается к ним по
+   паре команд (±1 день) — иначе поздние матчи уезжали на сутки из-за часового пояса Oddsportal.
    Внутри дня **красной рамкой + ★** отмечается **самый уверенный** матч, но только если
    модель и рынок согласны на фаворите **и** уверенность модели **не ниже** порога
    (ползунок «Уверенность модели для красной рамки», по умолчанию **65%**).
@@ -34,8 +41,9 @@
 ## Стек
 
 - **Фронтенд:** React 19, TypeScript, Vite; чистый CSS; oxlint; Vitest.
-- **Состояние:** хуки React + `localStorage` (настройки банка, порогов и отображения
-  переживают перезагрузку).
+- **Состояние:** хуки React + `localStorage` (настройки банка, порогов и отображения, а также
+  выбранные «суперматчи» дня — рамка/★ переезжают из предстоящих в прошедшие; переживают
+  перезагрузку).
 - **Данные:** официальный NHL API (`api-web.nhle.com`); Oddsportal через OddsHarvester
   (Python + Playwright).
 - **Сбор/конвертация:** Node.js (`scripts/fetch-nhl.mjs`), Python (`scripts/convert_odds.py`),
@@ -65,6 +73,7 @@ npm run preview    # локальный просмотр сборки
 npm test           # тесты модели (Vitest)
 npm run lint       # линтер oxlint
 npm run typecheck  # проверка типов
+npm run tune       # подбор гиперпараметров (walk-forward Brier/log-loss)
 ```
 
 ## Обновление данных
@@ -72,8 +81,9 @@ npm run typecheck  # проверка типов
 **Результаты матчей** (NHL API, CORS не даёт браузеру — собираем заранее):
 
 ```bash
-npm run fetch:nhl            # 3 сезона -> src/data/games.json
+npm run fetch:nhl            # 3 сезона -> src/data/games.json + предстоящие -> schedule.json
 npm run fetch:nhl:current    # только текущий сезон (прошлые берутся из файла)
+npm run fetch:advanced       # play-by-play -> 5v5-голы и броски -> src/data/advanced.json
 ```
 
 **Коэффициенты** (Oddsportal через OddsHarvester, Python):
@@ -119,7 +129,9 @@ python scripts/convert_odds.py nhl_upcoming.json
 ## Структура
 
 ```
-scripts/fetch-nhl.mjs            — сбор матчей с NHL API
+scripts/fetch-nhl.mjs            — сбор матчей и предстоящих игр с NHL API
+scripts/fetch-advanced.mjs       — сбор 5v5 (голы/Corsi) из play-by-play NHL
+scripts/tune.mjs                 — подбор гиперпараметров модели (walk-forward Brier/log-loss)
 scripts/convert_odds.py          — конвертер выгрузок OddsHarvester -> odds.json (со слиянием)
 scripts/dev-refresh-plugin.mjs   — dev-эндпоинт /api/refresh (матчи + кэфы), кнопка в UI
 src/model/model.ts               — Elo, Пуассон, отдых, таймзоны, walk-forward
@@ -130,6 +142,8 @@ src/components/MatchList.tsx     — списки матчей (группиро
 src/components/Bankroll.tsx      — купон, стратегии, дополнительные настройки
 src/components/DataRefresh.tsx   — кнопка и статус обновления данных
 src/data/games.json              — результаты матчей
+src/data/schedule.json           — предстоящие матчи (календарь NHL)
+src/data/advanced.json           — 5v5 голы и броски (Corsi) из play-by-play
 src/data/odds.json               — коэффициенты (накапливаются)
 src/data/updated.json            — время последнего полного обновления
 src/App.tsx, main.tsx, index.css
