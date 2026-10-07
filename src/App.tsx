@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bankroll } from './components/Bankroll'
 import { DataRefresh } from './components/DataRefresh'
 import { MatchList, type ListRow } from './components/MatchList'
@@ -97,7 +97,16 @@ export default function App() {
   const [bank, setBank] = useSetting(initialBank, 'bank')
   const [confidence, setConfidence] = useSetting(initialConfidence, 'conf')
 
-  const nameOf = (abbrev: string) => teams.find((t) => t.abbrev === abbrev)?.name ?? abbrev
+  // Ссылка на панель управления (controls). Нужна, чтобы после выбора матча
+  // можно было программно прокрутить страницу к прогнозу наверх.
+  const topRef = useRef<HTMLDivElement>(null)
+
+  // По аббревиатуре команды (напр. "COL") возвращает её полное название.
+  // useCallback — чтобы функция не пересоздавалась на каждый рендер.
+  const nameOf = useCallback(
+    (abbrev: string) => teams.find((t) => t.abbrev === abbrev)?.name ?? abbrev,
+    [teams],
+  )
   const sameTeam = home === away
   const prediction = useMemo(
     () => (home && away && !sameTeam ? predictMatch(ratings, home, away, date) : null),
@@ -300,11 +309,47 @@ export default function App() {
 
   const bestOf = useCallback((date: string) => picks[date] ?? null, [picks])
 
-  const select = (h: string, a: string, d: string) => {
+  // Выбор матча одной операцией: задаёт хозяев, гостей и дату, а затем
+  // плавно прокручивает страницу к панели прогноза (наверх).
+  const select = useCallback((h: string, a: string, d: string) => {
     setHome(h)
     setAway(a)
     setDate(d)
-  }
+    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  // Список готовых пар «дата · команда — команда» для выпадающего селектора.
+  // Берём предстоящие матчи и сыгранные текущего сезона; дубликаты отсекаем.
+  // value = "дата|хозяева|гости" — по нему потом разбираем выбор.
+  const matchOptions = useMemo(() => {
+    const seen = new Set<string>() // уже добавленные ключи, чтобы не дублировать
+    const opts: Array<{ value: string; label: string }> = []
+    const push = (d: string, h: string, a: string) => {
+      const key = `${d}|${h}|${a}`
+      if (seen.has(key)) return
+      seen.add(key)
+      opts.push({ value: key, label: `${d} · ${nameOf(h)} — ${nameOf(a)}` })
+    }
+    for (const u of upcoming) push(u.date, u.home, u.away) // предстоящие
+    for (const r of seasonRows) push(r.date, r.home, r.away) // сыгранные сезона
+    return opts
+  }, [upcoming, seasonRows, nameOf])
+
+  // Ключ текущего выбранного матча, например "2026-10-08|CAR|VAN".
+  const currentKey = `${date}|${home}|${away}`
+
+  // Варианты для селектора «Матч». Если текущий выбранный матч отсутствует в общем
+  // списке (например, выбран вручную через селекторы команд), добавляем его первым
+  // пунктом — чтобы селектор всегда отображал текущий выбор.
+  const pickerOptions = useMemo(() => {
+    if (home && away && !matchOptions.some((o) => o.value === currentKey)) {
+      return [{ value: currentKey, label: `${date} · ${nameOf(home)} — ${nameOf(away)}` }, ...matchOptions]
+    }
+    return matchOptions
+  }, [matchOptions, currentKey, date, home, away, nameOf])
+
+  // Значение селектора: текущий матч (или пусто, если команды не заданы).
+  const pickerValue = home && away ? currentKey : ''
 
   const confidentRows = seasonRows.filter(
     (r) =>
@@ -329,7 +374,29 @@ export default function App() {
 
       <DataRefresh />
 
-      <div className="controls">
+      <div className="controls" ref={topRef}>
+        <label className="match-picker">
+          Матч (выбрать пару)
+          {/* value={pickerValue} — селектор показывает текущий матч и синхронизирован
+              с остальными полями. При выборе разбираем "дата|хозяева|гости" и
+              вызываем select(), который задаёт всё сразу + прокручивает наверх. */}
+          <select
+            value={pickerValue}
+            onChange={(e) => {
+              const v = e.target.value
+              if (!v) return // выбрана пустая опция-плейсхолдер
+              const [d, h, a] = v.split('|')
+              if (d && h && a) select(h, a, d)
+            }}
+          >
+            <option value="">— выберите матч —</option>
+            {pickerOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Хозяева
           <select value={home} onChange={(e) => setHome(e.target.value)}>

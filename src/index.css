@@ -101,6 +101,11 @@ h3 {
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 6px 20px rgba(16, 24, 40, 0.06);
+  scroll-margin-top: 12px;
+}
+
+.match-picker {
+  grid-column: 1 / -1;
 }
 
 label {
