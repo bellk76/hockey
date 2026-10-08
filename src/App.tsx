@@ -10,6 +10,7 @@ import updated from './data/updated.json'
 import { advancedKey, buildRatings, predictMatch, walkForward, type AdvancedIndex } from './model/model'
 import { blend, findMarket, oddsData } from './model/odds'
 import type { Game, ScheduledGame, TeamInfo } from './types'
+import { recentGames } from './utils/form'
 import { readPicks, writePicks } from './utils/picks'
 import { initialBank, initialConfidence, useSetting } from './utils/settings'
 
@@ -148,6 +149,26 @@ export default function App() {
     }
     return map
   }, [])
+
+  // Сыгранные матчи каждой команды по убыванию даты — для «формы» в предстоящих матчах.
+  const gamesByTeam = useMemo(() => {
+    const map = new Map<string, Game[]>()
+    for (const g of dataset.games) {
+      for (const team of [g.home, g.away]) {
+        const list = map.get(team)
+        if (list) list.push(g)
+        else map.set(team, [g])
+      }
+    }
+    for (const list of map.values()) list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    return map
+  }, [])
+
+  // До n последних матчей команды строго до указанной даты (для «Ближайших»).
+  const recentOf = useCallback(
+    (team: string, date: string, n?: number): Game[] => recentGames(gamesByTeam, team, date, n),
+    [gamesByTeam],
+  )
 
   const upcoming = useMemo<ListRow[]>(() => {
     const seen = new Map<string, ListRow>()
@@ -525,6 +546,7 @@ export default function App() {
         emptyText="Нет предстоящих матчей."
         bestOf={bestOf}
         minConfidence={confidence / 100}
+        recentOf={recentOf}
       />
 
       <Bankroll bets={bets} bank={bank} onBank={setBank} day={TODAY} minConfidence={confidence} onMinConfidence={setConfidence} />

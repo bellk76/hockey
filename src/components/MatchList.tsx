@@ -1,3 +1,6 @@
+import type { Game } from '../types'
+import { FORM_N } from '../utils/form'
+
 export interface ListRow {
   date: string
   home: string
@@ -24,6 +27,7 @@ interface MatchListProps {
   minConfidence?: number
   collapsibleDays?: boolean
   bestOf?: (date: string) => string | null
+  recentOf?: (team: string, date: string, n?: number) => Game[]
 }
 
 function outcomeLabel(outcome?: string): string {
@@ -59,6 +63,7 @@ export function MatchList({
   minConfidence,
   collapsibleDays,
   bestOf,
+  recentOf,
 }: MatchListProps) {
   const byDate = new Map<string, ListRow[]>()
   for (const r of rows) {
@@ -87,6 +92,14 @@ export function MatchList({
         ? nameOf(r.home)
         : nameOf(r.away)
       : ''
+
+    const formTeams = recentOf
+      ? [
+          { team: r.home, side: 'home' },
+          { team: r.away, side: 'away' },
+        ].map((entry) => ({ ...entry, games: recentOf(entry.team, r.date, FORM_N) }))
+      : []
+    const formShown = formTeams.reduce((max, t) => Math.max(max, t.games.length), 0)
 
     return (
       <details key={key} className={`match${isBest ? ' best' : ''}`}>
@@ -125,6 +138,48 @@ export function MatchList({
           <button type="button" className="chip" onClick={() => onSelect(r.home, r.away, r.date)}>
             Прогноз на матч
           </button>
+          {recentOf && (
+            <div className="match-form">
+              <p className="match-form-title">
+                Форма команд
+                {formShown > 0 && (
+                  <>
+                    {' · последние '}
+                    {formShown} {plural(formShown, ['матч', 'матча', 'матчей'])}
+                  </>
+                )}
+              </p>
+              {formTeams.map(({ team, side, games }) => (
+                <div className="match-form-team" key={side}>
+                  <span className="match-form-club">{nameOf(team)}</span>
+                  <span className="match-form-games">
+                    {games.map((g) => {
+                      const isHome = g.home === team
+                      const own = isHome ? g.hs : g.as
+                      const opp = isHome ? g.as : g.hs
+                      const tone = own > opp ? 'ok' : own < opp ? 'bad' : 'draw'
+                      const resultText = own > opp ? 'победа' : own < opp ? 'поражение' : 'ничья'
+                      const keyClass = `match-form-key ${tone}`
+                      return (
+                        <span key={g.id ?? `${g.date}-${g.home}-${g.away}`} className="match-form-game">
+                          <span className={`match-form-dot ${tone}`} aria-hidden="true">
+                            ●
+                          </span>{' '}
+                          {g.date.slice(5)}{' '}
+                          <span className={isHome ? keyClass : undefined}>{nameOf(g.home)}</span>
+                          {' — '}
+                          <span className={isHome ? undefined : keyClass}>{nameOf(g.away)}</span>{' '}
+                          <b className={tone}>{g.hs}:{g.as}</b>
+                          <span className="sr-only"> {resultText}</span>
+                        </span>
+                      )
+                    })}
+                    {games.length === 0 && <span className="match-form-empty">нет сыгранных матчей</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </details>
     )
