@@ -106,6 +106,83 @@ h3 {
 
 .match-picker {
   grid-column: 1 / -1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #475467;
+}
+
+.picker-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #101828;
+  cursor: pointer;
+}
+
+.picker-button:focus-visible {
+  outline: 2px solid #1849a9;
+  outline-offset: 2px;
+}
+
+.picker-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-caret {
+  flex: none;
+  color: #667085;
+}
+
+.picker-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.16);
+}
+
+.picker-option {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #344054;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.picker-option:hover,
+.picker-option.active {
+  background: #eef4ff;
+}
+
+.picker-option.selected {
+  font-weight: 600;
+  color: #1849a9;
 }
 
 label {

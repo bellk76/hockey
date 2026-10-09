@@ -50,6 +50,41 @@ const TODAY = (() => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 })()
 
+// Уже сыгранные матчи (ключ «хозяева-гости-дата»). schedule.json может быть собран
+// раньше, чем появился результат, поэтому такие пары исключаем из предстоящих.
+const playedKeys = new Set<string>()
+for (const g of dataset.games) playedKeys.add(`${g.home}-${g.away}-${g.date}`)
+
+const UPCOMING_LIMIT = 15
+
+// Ближайшие предстоящие матчи по календарю NHL (без уже сыгранных и дубликатов),
+// по возрастанию даты. Общая логика для дефолтного матча и списка «Матч» — чтобы
+// верх списка и матч по умолчанию не разъезжались.
+function nearestUpcoming(): ScheduledGame[] {
+  const seen = new Set<string>()
+  const out: ScheduledGame[] = []
+  for (const s of schedule.games) {
+    if (s.date < TODAY) continue
+    if (playedKeys.has(`${s.home}-${s.away}-${s.date}`)) continue
+    const key = `${s.date}|${s.home}|${s.away}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(s)
+  }
+  return out
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .slice(0, UPCOMING_LIMIT)
+}
+
+// Матч по умолчанию — верхний (новейший) в показываемом списке (ближайшие предстоящие
+// + сыгранные), чтобы список при открытии начинался с самого свежего матча.
+const DEFAULT_MATCH = (() => {
+  const nearest = nearestUpcoming()
+  const pool = nearest.length > 0 ? nearest : dataset.games
+  if (pool.length === 0) return { home: '', away: '', date: TODAY }
+  return pool.reduce((best, s) => (s.date > best.date ? s : best))
+})()
+
 function formatDateTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso.slice(0, 10)
@@ -89,9 +124,9 @@ export default function App() {
     return dates.length ? dates.reduce((min, d) => (d < min ? d : min)) : maxDate
   }, [maxDate])
 
-  const [home, setHome] = useState(teams[0]?.abbrev ?? '')
-  const [away, setAway] = useState(teams[1]?.abbrev ?? '')
-  const [date, setDate] = useState(maxDate)
+  const [home, setHome] = useState(DEFAULT_MATCH.home)
+  const [away, setAway] = useState(DEFAULT_MATCH.away)
+  const [date, setDate] = useState(DEFAULT_MATCH.date)
   const [weight, setWeight] = useState(0.5)
   const [oddsHome, setOddsHome] = useState('')
   const [oddsAway, setOddsAway] = useState('')
@@ -102,13 +137,42 @@ export default function App() {
   // можно было программно прокрутить страницу к прогнозу наверх.
   const topRef = useRef<HTMLDivElement>(null)
 
+  // Кастомный выпадающий список «Матч». Нативный <select> браузер раскрывает сам и
+  // позиционирует по-своему (верх списка мог не совпадать с выбранным), поэтому рисуем
+  // свой список: всегда открывается сверху с самого свежего матча.
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const pickerRef = useRef<HTMLDivElement>(null)
+  const pickerButtonRef = useRef<HTMLDivElement>(null)
+  const pickerListRef = useRef<HTMLUListElement>(null)
+
+  // Закрываем список по клику вне него и по Escape (с возвратом фокуса на кнопку).
+  useEffect(() => {
+    if (!pickerOpen) return
+    const onMouseDown = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setPickerOpen(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPickerOpen(false)
+        pickerButtonRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [pickerOpen])
+
   // По аббревиатуре команды (напр. "COL") возвращает её полное название.
   // useCallback — чтобы функция не пересоздавалась на каждый рендер.
   const nameOf = useCallback(
     (abbrev: string) => teams.find((t) => t.abbrev === abbrev)?.name ?? abbrev,
     [teams],
   )
-  const sameTeam = home === away
+  const sameTeam = Boolean(home && away && home === away)
   const prediction = useMemo(
     () => (home && away && !sameTeam ? predictMatch(ratings, home, away, date) : null),
     [ratings, home, away, date, sameTeam],
@@ -135,20 +199,9 @@ export default function App() {
       : null
 
   const seasonRows = useMemo(
-    () => rows.filter((r) => r.date >= seasonStart).sort((a, b) => (a.date < b.date ? 1 : -1)),
+    () => rows.filter((r) => r.date >= seasonStart).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
     [rows, seasonStart],
   )
-
-  const playedByTeams = useMemo(() => {
-    const map = new Map<string, string[]>()
-    for (const g of dataset.games) {
-      const key = `${g.home}-${g.away}`
-      const dates = map.get(key) ?? []
-      dates.push(g.date)
-      map.set(key, dates)
-    }
-    return map
-  }, [])
 
   // Сыгранные матчи каждой команды по убыванию даты — для «формы» в предстоящих матчах.
   const gamesByTeam = useMemo(() => {
@@ -171,25 +224,19 @@ export default function App() {
   )
 
   const upcoming = useMemo<ListRow[]>(() => {
-    const seen = new Map<string, ListRow>()
     // Группируем по календарю NHL (schedule.json), а не по датам кэфов: у Oddsportal
     // дата сдвинута часовым поясом (Europe/Rome), и поздние матчи уезжают на сутки вперёд.
-    for (const s of schedule.games) {
-      if (s.date < TODAY) continue
-      // Матч уже с результатом (schedule.json мог быть собран раньше) — в предстоящие не берём.
-      const played = playedByTeams.get(`${s.home}-${s.away}`)
-      if (played?.includes(s.date)) continue
+    return nearestUpcoming().map((s) => {
       const p = predictMatch(ratings, s.home, s.away, s.date)
-      seen.set(`${s.date}-${s.home}-${s.away}`, {
+      return {
         date: s.date,
         home: s.home,
         away: s.away,
         pHome: p.pHomeFinal,
         pAway: p.pAwayFinal,
-      })
-    }
-    return [...seen.values()].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 15)
-  }, [ratings, playedByTeams])
+      }
+    })
+  }, [ratings])
 
   const bets = useMemo(
     () =>
@@ -336,7 +383,8 @@ export default function App() {
     setHome(h)
     setAway(a)
     setDate(d)
-    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = topRef.current
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
   // Список готовых пар «дата · команда — команда» для выпадающего селектора.
@@ -344,33 +392,64 @@ export default function App() {
   // value = "дата|хозяева|гости" — по нему потом разбираем выбор.
   const matchOptions = useMemo(() => {
     const seen = new Set<string>() // уже добавленные ключи, чтобы не дублировать
-    const opts: Array<{ value: string; label: string }> = []
+    const opts: Array<{ value: string; label: string; date: string }> = []
     const push = (d: string, h: string, a: string) => {
       const key = `${d}|${h}|${a}`
       if (seen.has(key)) return
       seen.add(key)
-      opts.push({ value: key, label: `${d} · ${nameOf(h)} — ${nameOf(a)}` })
+      opts.push({ value: key, label: `${d} · ${nameOf(h)} — ${nameOf(a)}`, date: d })
     }
     for (const u of upcoming) push(u.date, u.home, u.away) // предстоящие
     for (const r of seasonRows) push(r.date, r.home, r.away) // сыгранные сезона
-    return opts
+    // Сортировка по убыванию дат — от поздних к ранним, чтобы список не «прыгал».
+    return opts.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
   }, [upcoming, seasonRows, nameOf])
 
   // Ключ текущего выбранного матча, например "2026-10-08|CAR|VAN".
   const currentKey = `${date}|${home}|${away}`
 
   // Варианты для селектора «Матч». Если текущий выбранный матч отсутствует в общем
-  // списке (например, выбран вручную через селекторы команд), добавляем его первым
-  // пунктом — чтобы селектор всегда отображал текущий выбор.
+  // списке (например, выбран вручную через селекторы команд), добавляем его — но
+  // вставляем по дате, чтобы не ломать сортировку по убыванию, — селектор всё равно
+  // отображает текущий выбор.
   const pickerOptions = useMemo(() => {
     if (home && away && !matchOptions.some((o) => o.value === currentKey)) {
-      return [{ value: currentKey, label: `${date} · ${nameOf(home)} — ${nameOf(away)}` }, ...matchOptions]
+      const manual = { value: currentKey, label: `${date} · ${nameOf(home)} — ${nameOf(away)}`, date }
+      return [...matchOptions, manual].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
     }
     return matchOptions
   }, [matchOptions, currentKey, date, home, away, nameOf])
 
   // Значение селектора: текущий матч (или пусто, если команды не заданы).
   const pickerValue = home && away ? currentKey : ''
+
+  // Текст на кнопке селектора: подпись текущего матча (или плейсхолдер).
+  const pickerLabel = pickerOptions.find((o) => o.value === pickerValue)?.label ?? '— выберите матч —'
+
+  // Выбор матча из списка: разбираем "дата|хозяева|гости", прокручиваем наверх и
+  // возвращаем фокус на кнопку, чтобы управление с клавиатуры не терялось.
+  const chooseOption = (value: string | undefined) => {
+    if (!value) return
+    const [d, h, a] = value.split('|')
+    if (d && h && a) select(h, a, d)
+    setPickerOpen(false)
+    pickerButtonRef.current?.focus()
+  }
+
+  // Открытие списка: всегда начинаем сверху (с самого свежего матча) и ставим фокус
+  // на контрол, чтобы работала навигация с клавиатуры.
+  const openPicker = () => {
+    setActiveIndex(0)
+    setPickerOpen(true)
+    pickerButtonRef.current?.focus()
+  }
+
+  // Держим активный (подсвеченный) пункт в зоне видимости при навигации с клавиатуры.
+  useEffect(() => {
+    if (!pickerOpen) return
+    const el = pickerListRef.current?.children[activeIndex] as HTMLElement | undefined
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' })
+  }, [pickerOpen, activeIndex])
 
   const confidentRows = seasonRows.filter(
     (r) =>
@@ -381,7 +460,6 @@ export default function App() {
   const confidentCorrect = confidentRows.filter(
     (r) => (r.pHome >= r.pAway ? 'home' : 'away') === (r.hs > r.as ? 'home' : 'away'),
   ).length
-
 
   return (
     <div className="app">
@@ -396,28 +474,83 @@ export default function App() {
       <DataRefresh />
 
       <div className="controls" ref={topRef}>
-        <label className="match-picker">
-          Матч (выбрать пару)
-          {/* value={pickerValue} — селектор показывает текущий матч и синхронизирован
-              с остальными полями. При выборе разбираем "дата|хозяева|гости" и
-              вызываем select(), который задаёт всё сразу + прокручивает наверх. */}
-          <select
-            value={pickerValue}
-            onChange={(e) => {
-              const v = e.target.value
-              if (!v) return // выбрана пустая опция-плейсхолдер
-              const [d, h, a] = v.split('|')
-              if (d && h && a) select(h, a, d)
+        <div className="match-picker" ref={pickerRef}>
+          <span id="match-picker-title">Матч (выбрать пару)</span>
+          {/* Контрол-комбобокс (APG select-only): показывает текущий матч и синхронизирован
+              с остальными полями. Список рисуем сами: при раскрытии он всегда начинается
+              сверху, с самого свежего матча. При выборе разбираем "дата|хозяева|гости"
+              и вызываем select(). Роль combobox (а не button) — чтобы aria-activedescendant
+              корректно объявлял активный пункт скринридеру. */}
+          <div
+            ref={pickerButtonRef}
+            id="match-picker-btn"
+            role="combobox"
+            tabIndex={0}
+            className="picker-button"
+            aria-haspopup="listbox"
+            aria-autocomplete="none"
+            aria-controls={pickerOpen ? 'match-picker-list' : undefined}
+            aria-expanded={pickerOpen}
+            aria-labelledby="match-picker-title"
+            aria-activedescendant={
+              pickerOpen && pickerOptions.length > 0 ? `match-picker-opt-${activeIndex}` : undefined
+            }
+            onClick={() => (pickerOpen ? setPickerOpen(false) : openPicker())}
+            onKeyDown={(e) => {
+              const last = pickerOptions.length - 1
+              if (!pickerOpen) {
+                // Открываем список с клавиатуры.
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  openPicker()
+                }
+                return
+              }
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setActiveIndex((i) => Math.min(i + 1, Math.max(last, 0)))
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setActiveIndex((i) => Math.max(i - 1, 0))
+              } else if (e.key === 'Home') {
+                e.preventDefault()
+                setActiveIndex(0)
+              } else if (e.key === 'End') {
+                e.preventDefault()
+                setActiveIndex(Math.max(last, 0))
+              } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                chooseOption(pickerOptions[activeIndex]?.value)
+              } else if (e.key === 'Tab') {
+                setPickerOpen(false)
+              }
             }}
           >
-            <option value="">— выберите матч —</option>
-            {pickerOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <span className="picker-value">{pickerLabel}</span>
+            <span className="picker-caret" aria-hidden="true">
+              ▾
+            </span>
+          </div>
+          {pickerOpen && (
+            <ul className="picker-list" id="match-picker-list" role="listbox" aria-label="Матчи" ref={pickerListRef}>
+              {pickerOptions.map((o, i) => (
+                <li
+                  key={o.value}
+                  id={`match-picker-opt-${i}`}
+                  role="option"
+                  aria-selected={o.value === pickerValue}
+                  className={`picker-option${i === activeIndex ? ' active' : ''}${
+                    o.value === pickerValue ? ' selected' : ''
+                  }`}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  onClick={() => chooseOption(o.value)}
+                >
+                  {o.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <label>
           Хозяева
           <select value={home} onChange={(e) => setHome(e.target.value)}>
