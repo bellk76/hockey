@@ -4,6 +4,8 @@ import updated from '../data/updated.json'
 type Status = 'idle' | 'running' | 'done' | 'error'
 
 const STALE_MS = 60 * 60 * 1000
+// Как часто проверяем «устарели ли данные» (само обновление — раз в STALE_MS).
+const STALE_CHECK_MS = 5 * 60 * 1000
 
 interface RefreshEvent {
   type: 'phase' | 'log' | 'done' | 'error' | 'warn'
@@ -33,6 +35,12 @@ export function DataRefresh() {
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
   const [lastRefresh, setLastRefresh] = useState(() => Date.parse(updated.updatedAt) || 0)
+  const lastRefreshRef = useRef(lastRefresh)
+  useEffect(() => {
+    lastRefreshRef.current = lastRefresh
+  }, [lastRefresh])
+  // Время последней попытки авто-обновления (даже неудачной) — чтобы не ретраить каждые 5 минут.
+  const lastAttemptRef = useRef(0)
   const sourceRef = useRef<EventSource | null>(null)
   const finishedRef = useRef(false)
   const runningRef = useRef(false)
@@ -68,6 +76,7 @@ export function DataRefresh() {
       } else if (ev.type === 'done') {
         finishedRef.current = true
         runningRef.current = false
+        lastAttemptRef.current = Date.now()
         setPercent(100)
         setStatus('done')
         if (ev.full) {
@@ -77,6 +86,7 @@ export function DataRefresh() {
       } else if (ev.type === 'error') {
         finishedRef.current = true
         runningRef.current = false
+        lastAttemptRef.current = Date.now()
         setError(ev.message ?? 'Неизвестная ошибка')
         setStatus('error')
         source.close()
@@ -84,6 +94,7 @@ export function DataRefresh() {
     }
     source.onerror = () => {
       runningRef.current = false
+      lastAttemptRef.current = Date.now()
       if (!finishedRef.current) {
         setError('Соединение с сервером прервано. Запущено ли `npm run dev`?')
         setStatus('error')
@@ -94,18 +105,27 @@ export function DataRefresh() {
 
   useEffect(() => {
     let cancelled = false
+    let available = false
+    const maybeStart = () => {
+      if (!available || runningRef.current) return
+      const last = lastRefreshRef.current
+      if (Date.now() - last > STALE_MS && Date.now() - lastAttemptRef.current > STALE_MS) start()
+    }
     fetch('/api/refresh/status')
       .then((r) => (r.ok ? r.json() : null))
       .then((info: { available?: boolean } | null) => {
         if (cancelled || !info?.available) return
-        const last = Date.parse(updated.updatedAt) || 0
-        if (Date.now() - last > STALE_MS) start()
+        available = true
+        maybeStart()
       })
       .catch(() => {
         /* не dev — автообновление недоступно */
       })
+    // Периодическая проверка в dev: обновляем раз в час, пока открыта страница.
+    const timer = setInterval(maybeStart, STALE_CHECK_MS)
     return () => {
       cancelled = true
+      clearInterval(timer)
     }
   }, [start])
 
@@ -143,7 +163,8 @@ export function DataRefresh() {
 
       <p className="caption">
         Последнее полное обновление: {lastRefresh ? formatTime(lastRefresh) : '—'} (матчи + кэфы). Отметка
-        ставится только при полном успехе; авто-обновление срабатывает в dev, если прошло больше часа.
+        ставится только при полном успехе; в dev авто-обновление срабатывает, если прошло больше часа, и
+        повторяется каждый час, пока открыта страница.
       </p>
 
       {status === 'running' && (
