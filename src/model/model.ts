@@ -1,4 +1,5 @@
 import type { BacktestRow, Game, Prediction, Ratings, TeamInfo } from '../types'
+import { seasonYearOf } from '../utils/season.ts'
 
 export type StrengthSource = 'goals' | 'goals5' | 'corsi5' | 'xg5' | 'xgall'
 
@@ -87,11 +88,6 @@ for (let i = 1; i <= MAX_GOALS; i += 1) FACTORIAL[i] = FACTORIAL[i - 1] * i
 
 export function poisson(k: number, lambda: number): number {
   return (Math.exp(-lambda) * Math.pow(lambda, k)) / FACTORIAL[k]
-}
-
-function seasonOf(date: string): number {
-  const [year, month] = date.split('-').map(Number)
-  return month >= 9 ? year : year - 1
 }
 
 function daysBetween(a: string, b: string): number {
@@ -186,12 +182,12 @@ export function buildRatings(
   let awayGoals = 0
   let awayGames = 0
 
-  let currentSeason = sorted.length ? seasonOf(sorted[0].date) : 0
+  let currentSeason = sorted.length ? seasonYearOf(sorted[0].date) : 0
 
   for (const g of sorted) {
     if (!(g.home in elo) || !(g.away in elo)) continue
 
-    const season = seasonOf(g.date)
+    const season = seasonYearOf(g.date)
     if (season !== currentSeason) {
       for (const key of Object.keys(elo)) {
         elo[key] = cfg.eloStart + (elo[key] - cfg.eloStart) * cfg.eloSeasonRegression
@@ -432,7 +428,7 @@ export function walkForward(
 
   for (const g of sorted) {
     if (!(g.home in elo) || !(g.away in elo)) continue
-    const season = seasonOf(g.date)
+    const season = seasonYearOf(g.date)
     if (currentSeason !== 0 && season !== currentSeason) {
       for (const key of Object.keys(elo)) elo[key] = cfg.eloStart + (elo[key] - cfg.eloStart) * cfg.eloSeasonRegression
     }

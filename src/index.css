@@ -440,6 +440,31 @@ input {
   font-style: normal;
 }
 
+.streak-badge {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.streak-badge.win {
+  background: #fce7f3;
+  color: #c2185b;
+}
+
+.streak-badge.loss {
+  background: #e0f2fe;
+  color: #0277bd;
+}
+
+.streak-warn {
+  border-left: 3px solid #f59e0b;
+  padding-left: 8px;
+}
+
 .match-meta {
   display: flex;
   flex-wrap: wrap;

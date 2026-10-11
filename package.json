@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "tune": "node scripts/tune.mjs",
+    "streak-exp": "node scripts/streak-exp.mjs",
     "fetch:nhl": "node scripts/fetch-nhl.mjs",
     "fetch:nhl:current": "node scripts/fetch-nhl.mjs --current",
     "fetch:advanced": "node scripts/fetch-advanced.mjs",

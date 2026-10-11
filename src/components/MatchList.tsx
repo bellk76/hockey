@@ -1,5 +1,6 @@
 import type { Game } from '../types'
 import { FORM_N } from '../utils/form'
+import type { StreakInfo } from '../utils/streaks'
 
 export interface ListRow {
   date: string
@@ -28,6 +29,7 @@ interface MatchListProps {
   collapsibleDays?: boolean
   bestOf?: (date: string) => string | null
   recentOf?: (team: string, date: string, n?: number) => Game[]
+  streakOf?: (team: string, date: string) => StreakInfo | null
 }
 
 function outcomeLabel(outcome?: string): string {
@@ -52,6 +54,32 @@ function plural(n: number, forms: [string, string, string]): string {
   return forms[2]
 }
 
+// Бейдж серии: «серия к началу матча / рекорд за 2 прошлых сезона». Рендерится
+// только для экстремальных серий. Если серия уже превысила рекорд — показываем
+// оба числа и поясняем это в title.
+function StreakBadge({ streak }: { streak: StreakInfo | null }) {
+  if (!streak || (!streak.isExtremeWin && !streak.isExtremeLoss)) return null
+  const win = streak.isExtremeWin
+  const record = win ? streak.maxWin : streak.maxLoss
+  const kind = win ? 'победная' : 'проигрышная'
+  const icon = win ? '🔥' : '💧'
+  const beyond = streak.length > record
+  const title =
+    `${kind === 'победная' ? 'Победная' : 'Проигрышная'} серия к началу матча: ${streak.length}` +
+    (beyond
+      ? ` — уже превысила рекорд за 2 прошлых сезона (${record})`
+      : ` · Рекорд за 2 прошлых сезона: ${record}`)
+  return (
+    <em className={`streak-badge ${win ? 'win' : 'loss'}`} title={title}>
+      <span aria-hidden="true">{icon}</span>
+      {streak.length}/{record}
+      <span className="sr-only">
+        {` — ${kind} серия ${streak.length} ${plural(streak.length, ['матч', 'матча', 'матчей'])} подряд к началу матча, рекорд за 2 прошлых сезона: ${record}`}
+      </span>
+    </em>
+  )
+}
+
 export function MatchList({
   title,
   rows,
@@ -64,6 +92,7 @@ export function MatchList({
   collapsibleDays,
   bestOf,
   recentOf,
+  streakOf,
 }: MatchListProps) {
   const byDate = new Map<string, ListRow[]>()
   for (const r of rows) {
@@ -101,17 +130,26 @@ export function MatchList({
       : []
     const formShown = formTeams.reduce((max, t) => Math.max(max, t.games.length), 0)
 
+    const homeStreak = streakOf ? streakOf(r.home, r.date) : null
+    const awayStreak = streakOf ? streakOf(r.away, r.date) : null
+
     return (
       <details key={key} className={`match${isBest ? ' best' : ''}`}>
         <summary className="match-summary">
           {showDate && <span className="match-date">{fullDate ? r.date : r.date.slice(5)}</span>}
           <span className="match-teams">
-            <span className="team home">{nameOf(r.home)}</span>
+            <span className="team home">
+              {nameOf(r.home)}
+              <StreakBadge streak={homeStreak} />
+            </span>
             <span className="score">
               {played ? `${r.hs} : ${r.as}` : '—'}
               {outcomeLabel(r.outcome) && <em className="badge">{outcomeLabel(r.outcome)}</em>}
             </span>
-            <span className="team away">{nameOf(r.away)}</span>
+            <span className="team away">
+              {nameOf(r.away)}
+              <StreakBadge streak={awayStreak} />
+            </span>
           </span>
           <span className="match-flag">
             {isBest && <span className="best-badge">★</span>}

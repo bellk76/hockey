@@ -12,7 +12,9 @@ import { blend, findMarket, oddsData } from './model/odds'
 import type { Game, ScheduledGame, TeamInfo } from './types'
 import { recentGames } from './utils/form'
 import { readPicks, writePicks } from './utils/picks'
+import { seasonStartOf } from './utils/season'
 import { initialBank, initialConfidence, useSetting } from './utils/settings'
+import { streakOf, streakPenalty } from './utils/streaks'
 
 const dataset = raw as { generatedAt: string; teams: TeamInfo[]; games: Game[] }
 const schedule = scheduleRaw as { generatedAt: string; games: ScheduledGame[] }
@@ -116,10 +118,9 @@ export default function App() {
   const ratings = useMemo(() => buildRatings(dataset.games, dataset.teams, undefined, advancedIndex), [])
   const rows = useMemo(() => walkForward(dataset.games, dataset.teams, undefined, advancedIndex), [])
   const maxDate = useMemo(() => latestDate(dataset.games), [])
-  const seasonStart = useMemo(() => {
-    const [year, month] = TODAY.split('-').map(Number)
-    const seasonYear = month >= 9 ? year : year - 1
-    const prefix = `${seasonYear}-09-01`
+  // Дата первого матча текущего сезона (для заголовка списка).
+  const seasonFirstDate = useMemo(() => {
+    const prefix = seasonStartOf(TODAY)
     const dates = dataset.games.map((g) => g.date).filter((d) => d >= prefix)
     return dates.length ? dates.reduce((min, d) => (d < min ? d : min)) : maxDate
   }, [maxDate])
@@ -199,8 +200,8 @@ export default function App() {
       : null
 
   const seasonRows = useMemo(
-    () => rows.filter((r) => r.date >= seasonStart).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
-    [rows, seasonStart],
+    () => rows.filter((r) => r.date >= seasonFirstDate).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    [rows, seasonFirstDate],
   )
 
   // Сыгранные матчи каждой команды по убыванию даты — для «формы» в предстоящих матчах.
@@ -216,6 +217,13 @@ export default function App() {
     for (const list of map.values()) list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
     return map
   }, [])
+
+  // Те же матчи по возрастанию даты — для серий (streakOf идёт с конца списка).
+  const gamesAscByTeam = useMemo(() => {
+    const map = new Map<string, Game[]>()
+    for (const [team, list] of gamesByTeam) map.set(team, [...list].reverse())
+    return map
+  }, [gamesByTeam])
 
   // До n последних матчей команды строго до указанной даты (для «Ближайших»).
   const recentOf = useCallback(
@@ -333,6 +341,13 @@ export default function App() {
     }
   }, [])
 
+  // Строка серий для команды и даты — используется в MatchList, PredictionView
+  // и отборе суперматча. Индекс по команде: O(игры команды) вместо O(все игры).
+  const streakLookup = useCallback(
+    (team: string, date: string) => streakOf(gamesAscByTeam.get(team) ?? [], team, date),
+    [gamesAscByTeam],
+  )
+
   // «Суперматч дня» (рамка + ★). В предстоящих считается каждый раз; когда матч
   // становится прошедшим, выбор берётся из сохранённого — рамка «переезжает».
   const [initialPicks] = useState(readPicks)
@@ -349,7 +364,15 @@ export default function App() {
         const modelFav = (r.pHome as number) >= (r.pAway as number) ? 'home' : 'away'
         const marketFav = (m.pHome as number) >= (m.pAway as number) ? 'home' : 'away'
         if (modelFav !== marketFav) continue
-        const p = Math.max(r.pHome as number, (r.pAway ?? 0) as number)
+        let p = Math.max(r.pHome as number, (r.pAway ?? 0) as number)
+        // Корректировка по сериям: штрафуем фаворита на экстремальной победной серии
+        // или при экстремальной проигрышной серии аутсайдера («отскок»).
+        // Влияет только на выбор суперматча, не на показанные вероятности.
+        const favTeam = modelFav === 'home' ? r.home : r.away
+        const underTeam = modelFav === 'home' ? r.away : r.home
+        const favStreak = streakLookup(favTeam, r.date)
+        const underStreak = streakLookup(underTeam, r.date)
+        p *= streakPenalty(favStreak, underStreak)
         if (Math.round(p * 100) >= confidence && p > bestProb) {
           bestProb = p
           best = `${r.home}-${r.away}`
@@ -369,7 +392,7 @@ export default function App() {
       if (key) next[date] = key
     }
     return next
-  }, [upcoming, seasonRows, marketOf, confidence, initialPicks])
+  }, [upcoming, seasonRows, marketOf, confidence, initialPicks, streakLookup])
 
   useEffect(() => {
     writePicks(picks)
@@ -596,6 +619,8 @@ export default function App() {
           blended={blended}
           weight={weight}
           onWeight={setWeight}
+          homeStreak={streakLookup(home, date)}
+          awayStreak={streakLookup(away, date)}
           note={
             date < maxDate
               ? 'Для прошедшей даты показаны рейтинги на последнюю дату данных, а не walk-forward. Честный прогноз на этот день — в списке «Матчи на…».'
@@ -643,8 +668,16 @@ export default function App() {
         </p>
       </section>
 
+      <p className="caption">
+        🔥 / 💧 — экстремальная серия: 🔥 = победная, 💧 = проигрышная. Формат{' '}
+        <strong>серия к началу матча / рекорд за 2 прошлых сезона</strong>. Например, 🔥4/9 — к началу этого матча
+        4 победы подряд, рекорд команды за два сезона — 9. Для сыгранных матчей результат самого матча в серию не
+        входит; для предстоящих серия показывается на сейчас. Серия считается экстремальной при длине от 4 матчей
+        и ≥ 75% от рекорда; без данных за прошлые сезоны бейдж не показывается.
+      </p>
+
       <MatchList
-        title={`Матчи текущего сезона (с ${seasonStart})`}
+        title={`Матчи текущего сезона (с ${seasonFirstDate})`}
         rows={seasonRows}
         nameOf={nameOf}
         marketOf={marketOf}
@@ -654,6 +687,7 @@ export default function App() {
         collapsibleDays
         bestOf={bestOf}
         minConfidence={confidence / 100}
+        streakOf={streakLookup}
       />
       {confidentRows.length > 0 && (
         <p className="caption summary">
@@ -665,9 +699,11 @@ export default function App() {
 
       <p className="caption">
         Красная рамка ★ — самый уверенный матч игрового дня: модель и рынок согласны на фаворите, а уверенность
-        модели не ниже порога (по умолчанию 65%). Порог регулируется ползунком «Уверенность модели для
-        красной рамки» в «Дополнительных настройках» внизу. В «Ближайших» рамка считается заново, а когда матч
-        становится сыгранным — сохраняется за ним, чтобы видеть, угадан ли прогноз на «суперматч».
+        модели не ниже порога (по умолчанию 65%). При отборе дополнительно учитывается корректировка по сериям
+        🔥/💧: до −6% к вероятности фаворита (штраф фавориту на победной серии и при проигрышной серии
+        аутсайдера). На показанные вероятности корректировка не влияет. Порог регулируется ползунком «Уверенность
+        модели для красной рамки» в «Дополнительных настройках» внизу. В «Ближайших» рамка считается заново, а
+        когда матч становится сыгранным — сохраняется за ним, чтобы видеть, угадан ли прогноз на «суперматч».
       </p>
 
       <MatchList
@@ -680,6 +716,7 @@ export default function App() {
         bestOf={bestOf}
         minConfidence={confidence / 100}
         recentOf={recentOf}
+        streakOf={streakLookup}
       />
 
       <Bankroll bets={bets} bank={bank} onBank={setBank} day={TODAY} minConfidence={confidence} onMinConfidence={setConfidence} />

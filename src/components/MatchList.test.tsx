@@ -1,6 +1,7 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Game } from '../types'
+import type { StreakInfo } from '../utils/streaks'
 import { MatchList, type ListRow } from './MatchList'
 
 afterEach(cleanup)
@@ -100,5 +101,72 @@ describe('MatchList · форма команд', () => {
   it('без пропа recentOf блок формы не рендерится', () => {
     const { container } = renderUpcoming()
     expect(container.querySelector('.match-form')).toBeNull()
+  })
+})
+
+describe('MatchList · бейджи серий', () => {
+  const streak = (over: Partial<StreakInfo>): StreakInfo => ({
+    type: 'win',
+    length: 4,
+    maxWin: 9,
+    maxLoss: 6,
+    isExtremeWin: false,
+    isExtremeLoss: false,
+    ...over,
+  })
+
+  function renderWithStreak(get: (team: string, date: string) => StreakInfo | null) {
+    return render(
+      <MatchList
+        title="Ближайшие матчи"
+        rows={rows}
+        nameOf={nameOf}
+        marketOf={marketOf}
+        onSelect={onSelect}
+        emptyText="Нет предстоящих матчей."
+        streakOf={get}
+      />,
+    )
+  }
+
+  it('показывает 🔥 с форматом текущая/рекорд, title и sr-only', () => {
+    const { container } = renderWithStreak((team) =>
+      team === 'CAR' ? streak({ type: 'win', length: 4, maxWin: 9, isExtremeWin: true }) : null,
+    )
+    const badge = container.querySelector('.streak-badge.win')
+    expect(badge).not.toBeNull()
+    // Видимая часть бейджа (без sr-only-текста) — иконка и текущая/рекорд.
+    expect(badge?.textContent?.startsWith('🔥4/9')).toBe(true)
+    expect(badge?.getAttribute('title')).toBe('Победная серия к началу матча: 4 · Рекорд за 2 прошлых сезона: 9')
+    // Текст доступен скринридеру: не только иконка и цифры.
+    expect(badge?.querySelector('.sr-only')?.textContent).toContain('победная серия 4')
+    // У гостей серии нет — бейдж один.
+    expect(container.querySelectorAll('.streak-badge')).toHaveLength(1)
+  })
+
+  it('показывает 💧 для проигрышной серии', () => {
+    const { container } = renderWithStreak((team) =>
+      team === 'VAN' ? streak({ type: 'loss', length: 6, maxLoss: 6, isExtremeLoss: true }) : null,
+    )
+    const badge = container.querySelector('.streak-badge.loss')
+    expect(badge?.textContent?.startsWith('💧6/6')).toBe(true)
+    expect(badge?.getAttribute('title')).toBe('Проигрышная серия к началу матча: 6 · Рекорд за 2 прошлых сезона: 6')
+    expect(badge?.querySelector('.sr-only')?.textContent).toContain('проигрышная серия 6')
+  })
+
+  it('не экстремальная серия не показывается', () => {
+    const { container } = renderWithStreak(() => streak({ length: 3 }))
+    expect(container.querySelector('.streak-badge')).toBeNull()
+  })
+
+  it('серия длиннее рекорда помечается в title', () => {
+    const { container } = renderWithStreak((team) =>
+      team === 'CAR' ? streak({ length: 10, maxWin: 9, isExtremeWin: true }) : null,
+    )
+    const badge = container.querySelector('.streak-badge.win')
+    expect(badge?.textContent?.startsWith('🔥10/9')).toBe(true)
+    expect(badge?.getAttribute('title')).toBe(
+      'Победная серия к началу матча: 10 — уже превысила рекорд за 2 прошлых сезона (9)',
+    )
   })
 })

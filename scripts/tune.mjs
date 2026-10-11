@@ -4,6 +4,7 @@
 
 import { readFileSync } from 'node:fs'
 import { advancedKey, defaultModelConfig, walkForward } from '../src/model/model.ts'
+import { seasonYearOf } from '../src/utils/season.ts'
 
 const root = new URL('..', import.meta.url)
 const dataset = JSON.parse(readFileSync(new URL('src/data/games.json', root), 'utf8'))
@@ -27,11 +28,6 @@ for (const g of advRaw.games ?? []) {
 
 const clamp = (p) => Math.min(0.999, Math.max(0.001, p))
 
-function seasonOf(date) {
-  const [year, month] = date.split('-').map(Number)
-  return month >= 9 ? year : year - 1
-}
-
 function metrics(rows, seasonsFilter) {
   let brier = 0
   let logLoss = 0
@@ -39,7 +35,7 @@ function metrics(rows, seasonsFilter) {
   let correct = 0
   for (const r of rows) {
     if (!Number.isFinite(r.pHome)) continue
-    if (seasonsFilter && !seasonsFilter.has(seasonOf(r.date))) continue
+    if (seasonsFilter && !seasonsFilter.has(seasonYearOf(r.date))) continue
     const p = clamp(r.pHome)
     const y = r.hs > r.as ? 1 : 0
     brier += (p - y) ** 2
@@ -54,7 +50,7 @@ function seasonBriers(rows) {
   const bySeason = new Map()
   for (const r of rows) {
     if (!Number.isFinite(r.pHome)) continue
-    const s = seasonOf(r.date)
+    const s = seasonYearOf(r.date)
     if (!bySeason.has(s)) bySeason.set(s, [])
     bySeason.get(s).push(r)
   }
@@ -104,7 +100,7 @@ const fmt = (m) => `n=${String(m.n).padStart(5)}  Brier=${m.brier.toFixed(4)}  l
 
 // базовый прогон
 const baseRows = walkForward(games, teams, defaultModelConfig, advanced)
-const seasons = [...new Set(baseRows.filter((r) => Number.isFinite(r.pHome)).map((r) => seasonOf(r.date)))].sort()
+const seasons = [...new Set(baseRows.filter((r) => Number.isFinite(r.pHome)).map((r) => seasonYearOf(r.date)))].sort()
 const valSeason = seasons[seasons.length - 1]
 const valSet = new Set([valSeason])
 
@@ -115,7 +111,7 @@ console.log('валидация:', fmt(metrics(baseRows, valSet)))
 for (const [s, m] of Object.entries(seasonBriers(baseRows))) console.log(`  сезон ${s}: ${fmt(m)}`)
 console.log('\n=== Рынок (где есть кэфы) ===')
 console.log('все:      ', fmt(marketMetrics(baseRows)))
-console.log('валидация:', fmt(marketMetrics(baseRows.filter((r) => valSet.has(seasonOf(r.date))))))
+console.log('валидация:', fmt(marketMetrics(baseRows.filter((r) => valSet.has(seasonYearOf(r.date))))))
 
 // --- поиск ---
 const space = {

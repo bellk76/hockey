@@ -1,4 +1,5 @@
 import type { Prediction } from '../types'
+import type { StreakInfo } from '../utils/streaks'
 
 interface Market {
   pHome: number
@@ -20,6 +21,8 @@ interface PredictionViewProps {
   weight: number
   onWeight: (value: number) => void
   note?: string
+  homeStreak?: StreakInfo | null
+  awayStreak?: StreakInfo | null
 }
 
 function percent(value: number): string {
@@ -39,6 +42,24 @@ function Bar({ home, away }: { home: number; away: number }) {
   )
 }
 
+// Роли должны совпадать со штрафом для ★ (streakPenalty): штрафуется только
+// победная серия фаворита и проигрышная серия аутсайдера — для остальных
+// комбинаций предупреждение не показываем.
+function streakNote(
+  name: string,
+  s: StreakInfo | null | undefined,
+  role: 'fav' | 'under',
+): string | null {
+  if (!s) return null
+  const record = s.type === 'win' ? s.maxWin : s.maxLoss
+  const near = s.length > record ? `уже превысила рекорд (${record})` : `близка к рекорду (${record})`
+  if (s.isExtremeWin && role === 'fav')
+    return `Победная серия ${name} (${s.length}) ${near} — учитывается при выборе суперматча (★), на вероятности ниже не влияет.`
+  if (s.isExtremeLoss && role === 'under')
+    return `Проигрышная серия ${name} (${s.length}) ${near} — возможен отскок; влияет только на выбор суперматча (★).`
+  return null
+}
+
 export function PredictionView({
   homeName,
   awayName,
@@ -48,14 +69,27 @@ export function PredictionView({
   weight,
   onWeight,
   note,
+  homeStreak,
+  awayStreak,
 }: PredictionViewProps) {
   const p = prediction
+  // Фаворит по модели — та же логика, что в отборе суперматча (★).
+  const homeIsFav = p.pHomeFinal >= p.pAwayFinal
+  const streakWarnings = [
+    streakNote(homeName, homeStreak, homeIsFav ? 'fav' : 'under'),
+    streakNote(awayName, awayStreak, homeIsFav ? 'under' : 'fav'),
+  ].filter(Boolean)
   return (
     <section className="prediction">
       <h2>
         {homeName} — {awayName}
       </h2>
       {note && <p className="caption warn">{note}</p>}
+      {streakWarnings.map((w, i) => (
+        <p key={i} className="caption warn streak-warn">
+          {w}
+        </p>
+      ))}
 
       <p className="row-label">Основное время — три исхода</p>
       <div className="bar3">
