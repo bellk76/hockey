@@ -5,6 +5,7 @@ import { MatchList, type ListRow } from './components/MatchList'
 import { PredictionView } from './components/PredictionView'
 import advancedRaw from './data/advanced.json'
 import raw from './data/games.json'
+import previewsRaw from './data/previews.json'
 import scheduleRaw from './data/schedule.json'
 import updated from './data/updated.json'
 import { advancedKey, buildRatings, predictMatch, walkForward, type AdvancedIndex } from './model/model'
@@ -18,6 +19,10 @@ import { streakOf, streakPenalty } from './utils/streaks'
 
 const dataset = raw as { generatedAt: string; teams: TeamInfo[]; games: Game[] }
 const schedule = scheduleRaw as { generatedAt: string; games: ScheduledGame[] }
+const previews = previewsRaw as {
+  generatedAt: string
+  teams: Record<string, { name: string; injuries: Array<{ name: string; status: string; pos?: 'G' }> }>
+}
 
 const advancedIndex: AdvancedIndex = {}
 type AdvancedRow = {
@@ -229,6 +234,12 @@ export default function App() {
   const recentOf = useCallback(
     (team: string, date: string, n?: number): Game[] => recentGames(gamesByTeam, team, date, n),
     [gamesByTeam],
+  )
+
+  // Кто вне состава у команды (из предыгрового превью Daily Faceoff).
+  const missingOf = useCallback(
+    (abbrev: string) => previews.teams[abbrev]?.injuries ?? [],
+    [],
   )
 
   const upcoming = useMemo<ListRow[]>(() => {
@@ -717,6 +728,7 @@ export default function App() {
         minConfidence={confidence / 100}
         recentOf={recentOf}
         streakOf={streakLookup}
+        missingOf={missingOf}
       />
 
       <Bankroll bets={bets} bank={bank} onBank={setBank} day={TODAY} minConfidence={confidence} onMinConfidence={setConfidence} />

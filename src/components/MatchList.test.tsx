@@ -126,6 +126,37 @@ describe('MatchList · форма команд', () => {
   })
 })
 
+describe('MatchList · вне состава', () => {
+  it('показывает отсутствующих игроков с их статусом', () => {
+    const missing: Record<string, Array<{ name: string; status: string; pos?: 'G' }>> = {
+      CAR: [{ name: 'Jordan Staal', status: 'травмирован' }],
+      VAN: [{ name: 'Thatcher Demko', status: 'вне состава', pos: 'G' }],
+    }
+    const { container } = render(
+      <MatchList
+        title="Ближайшие матчи"
+        rows={rows}
+        nameOf={nameOf}
+        marketOf={marketOf}
+        onSelect={onSelect}
+        emptyText=""
+        missingOf={(team) => missing[team] ?? []}
+      />,
+    )
+    const block = container.querySelector('.match-missing')
+    expect(block).not.toBeNull()
+    expect(block?.textContent).toContain('Carolina')
+    expect(block?.textContent).toContain('вне состава')
+    expect(block?.textContent).toContain('Jordan Staal (травмирован)')
+    expect(block?.textContent).toContain('Thatcher Demko (вне состава · вратарь)')
+  })
+
+  it('без пропа missingOf блок не рендерится', () => {
+    const { container } = renderUpcoming(() => [])
+    expect(container.querySelector('.match-missing')).toBeNull()
+  })
+})
+
 describe('MatchList · бейджи серий', () => {
   const streak = (over: Partial<StreakInfo>): StreakInfo => ({
     type: 'win',

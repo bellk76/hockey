@@ -535,6 +535,24 @@ input {
   color: #98a2b3;
 }
 
+.match-missing {
+  flex-basis: 100%;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed #eaecf0;
+  font-size: 12px;
+  color: #b42318;
+}
+
+.match-missing-team {
+  margin: 2px 0;
+}
+
+.match-missing-club {
+  font-weight: 600;
+  color: #344054;
+}
+
 .ok {
   color: #027a48;
 }

@@ -30,6 +30,7 @@ interface MatchListProps {
   bestOf?: (date: string) => string | null
   recentOf?: (team: string, date: string, n?: number) => Game[]
   streakOf?: (team: string, date: string) => StreakInfo | null
+  missingOf?: (abbrev: string) => Array<{ name: string; status: string; pos?: 'G' }>
 }
 
 function outcomeLabel(outcome?: string): string {
@@ -93,6 +94,7 @@ export function MatchList({
   bestOf,
   recentOf,
   streakOf,
+  missingOf,
 }: MatchListProps) {
   const byDate = new Map<string, ListRow[]>()
   for (const r of rows) {
@@ -132,6 +134,10 @@ export function MatchList({
 
     const homeStreak = streakOf ? streakOf(r.home, r.date) : null
     const awayStreak = streakOf ? streakOf(r.away, r.date) : null
+
+    const homeMissing = missingOf ? missingOf(r.home) : []
+    const awayMissing = missingOf ? missingOf(r.away) : []
+    const hasMissing = homeMissing.length > 0 || awayMissing.length > 0
 
     return (
       <details key={key} className={`match${isBest ? ' best' : ''}`}>
@@ -176,6 +182,22 @@ export function MatchList({
           <button type="button" className="chip" onClick={() => onSelect(r.home, r.away, r.date)}>
             Прогноз на матч
           </button>
+          {hasMissing && (
+            <div className="match-missing">
+              {homeMissing.length > 0 && (
+                <p className="match-missing-team">
+                  <span className="match-missing-club">{nameOf(r.home)}</span> вне состава:{' '}
+                  {homeMissing.map((m) => `${m.name} (${m.status}${m.pos === 'G' ? ' · вратарь' : ''})`).join(', ')}
+                </p>
+              )}
+              {awayMissing.length > 0 && (
+                <p className="match-missing-team">
+                  <span className="match-missing-club">{nameOf(r.away)}</span> вне состава:{' '}
+                  {awayMissing.map((m) => `${m.name} (${m.status}${m.pos === 'G' ? ' · вратарь' : ''})`).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
           {recentOf && (
             <div className="match-form">
               <p className="match-form-title">

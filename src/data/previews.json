@@ -1,0 +1,563 @@
+{
+  "generatedAt": "2026-10-16T14:09:30.754Z",
+  "teams": {
+    "COL": {
+      "name": "Colorado Avalanche",
+      "injuries": [
+        {
+          "name": "Logan O'Connor",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Nicolas Roy",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "PIT": {
+      "name": "Pittsburgh Penguins",
+      "injuries": [
+        {
+          "name": "Justin Brazeau",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "ANA": {
+      "name": "Anaheim Ducks",
+      "injuries": [
+        {
+          "name": "Troy Terry",
+          "status": "травмирован"
+        },
+        {
+          "name": "Ian Moore",
+          "status": "травмирован"
+        },
+        {
+          "name": "Cutter Gauthier",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Ryan Poehling",
+          "status": "травмирован"
+        },
+        {
+          "name": "Mikael Granlund",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "BOS": {
+      "name": "Boston Bruins",
+      "injuries": []
+    },
+    "WSH": {
+      "name": "Washington Capitals",
+      "injuries": [
+        {
+          "name": "Rasmus Sandin",
+          "status": "вне состава"
+        },
+        {
+          "name": "Matt Roy",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Pierre-Luc Dubois",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "NJD": {
+      "name": "New Jersey Devils",
+      "injuries": [
+        {
+          "name": "Seamus Casey",
+          "status": "травмирован"
+        },
+        {
+          "name": "Nick Bjugstad",
+          "status": "травмирован"
+        },
+        {
+          "name": "Connor Brown",
+          "status": "травмирован"
+        },
+        {
+          "name": "Luke Evangelista",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "WPG": {
+      "name": "Winnipeg Jets",
+      "injuries": [
+        {
+          "name": "Elias Salomonsson",
+          "status": "вне состава"
+        },
+        {
+          "name": "Connor Hellebuyck",
+          "status": "вне состава",
+          "pos": "G"
+        },
+        {
+          "name": "Josh Morrissey",
+          "status": "вне состава"
+        },
+        {
+          "name": "Vladislav Namestnikov",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "CAR": {
+      "name": "Carolina Hurricanes",
+      "injuries": [
+        {
+          "name": "Seth Jarvis",
+          "status": "вне состава"
+        },
+        {
+          "name": "Alexander Nikishin",
+          "status": "вне состава"
+        },
+        {
+          "name": "Jordan Staal",
+          "status": "травмирован"
+        },
+        {
+          "name": "Taylor Hall",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "TBL": {
+      "name": "Tampa Bay Lightning",
+      "injuries": [
+        {
+          "name": "Yanni Gourde",
+          "status": "вне состава"
+        }
+      ]
+    },
+    "VAN": {
+      "name": "Vancouver Canucks",
+      "injuries": [
+        {
+          "name": "Thatcher Demko",
+          "status": "вне состава",
+          "pos": "G"
+        }
+      ]
+    },
+    "FLA": {
+      "name": "Florida Panthers",
+      "injuries": [
+        {
+          "name": "Aleksander Barkov",
+          "status": "травмирован"
+        },
+        {
+          "name": "Jonah Gadjovich",
+          "status": "травмирован"
+        },
+        {
+          "name": "Brad Marchand",
+          "status": "травмирован"
+        },
+        {
+          "name": "Jacob Markstrom",
+          "status": "под вопросом",
+          "pos": "G"
+        }
+      ]
+    },
+    "SEA": {
+      "name": "Seattle Kraken",
+      "injuries": [
+        {
+          "name": "Jacob Melanson",
+          "status": "травмирован"
+        },
+        {
+          "name": "Ryan Lindgren",
+          "status": "вне состава"
+        },
+        {
+          "name": "Brandon Montour",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "TOR": {
+      "name": "Toronto Maple Leafs",
+      "injuries": [
+        {
+          "name": "Elvis Merzlikins",
+          "status": "травмирован"
+        },
+        {
+          "name": "Max Domi",
+          "status": "травмирован"
+        },
+        {
+          "name": "Dakota Joshua",
+          "status": "травмирован"
+        },
+        {
+          "name": "Chris Tanev",
+          "status": "травмирован"
+        },
+        {
+          "name": "John Tavares",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "NYI": {
+      "name": "New York Islanders",
+      "injuries": [
+        {
+          "name": "Mathew Barzal",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Alexander Romanov",
+          "status": "травмирован"
+        }
+      ]
+    },
+    "MTL": {
+      "name": "Montréal Canadiens",
+      "injuries": []
+    },
+    "BUF": {
+      "name": "Buffalo Sabres",
+      "injuries": [
+        {
+          "name": "Jason Zucker",
+          "status": "травмирован"
+        },
+        {
+          "name": "Conor Timmins",
+          "status": "травмирован"
+        },
+        {
+          "name": "Alex Lyon",
+          "status": "вне состава",
+          "pos": "G"
+        },
+        {
+          "name": "Matt Grzelcyk",
+          "status": "травмирован"
+        },
+        {
+          "name": "Rasmus Dahlin",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Jiri Kulich",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Josh Norris",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "DET": {
+      "name": "Detroit Red Wings",
+      "injuries": [
+        {
+          "name": "J.T. Compher",
+          "status": "травмирован"
+        },
+        {
+          "name": "Marco Kasper",
+          "status": "травмирован"
+        },
+        {
+          "name": "Mason Appleton",
+          "status": "травмирован"
+        }
+      ]
+    },
+    "SJS": {
+      "name": "San Jose Sharks",
+      "injuries": [
+        {
+          "name": "Darnell Nurse",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "PHI": {
+      "name": "Philadelphia Flyers",
+      "injuries": [
+        {
+          "name": "Nikita Grebenkin",
+          "status": "травмирован"
+        },
+        {
+          "name": "Rasmus Ristolainen",
+          "status": "травмирован"
+        },
+        {
+          "name": "Travis Konecny",
+          "status": "травмирован"
+        },
+        {
+          "name": "Cam York",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "OTT": {
+      "name": "Ottawa Senators",
+      "injuries": [
+        {
+          "name": "William Eklund",
+          "status": "травмирован"
+        },
+        {
+          "name": "Kurtis MacDermid",
+          "status": "травмирован"
+        },
+        {
+          "name": "Jake Sanderson",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "CBJ": {
+      "name": "Columbus Blue Jackets",
+      "injuries": [
+        {
+          "name": "Isac Lundestrom",
+          "status": "травмирован"
+        },
+        {
+          "name": "Ivan Provorov",
+          "status": "травмирован"
+        },
+        {
+          "name": "Dante Fabbro",
+          "status": "вне состава"
+        }
+      ]
+    },
+    "NYR": {
+      "name": "New York Rangers",
+      "injuries": [
+        {
+          "name": "Igor Shesterkin",
+          "status": "травмирован",
+          "pos": "G"
+        },
+        {
+          "name": "Joe Veleno",
+          "status": "травмирован"
+        },
+        {
+          "name": "Joonas Korpisalo",
+          "status": "травмирован",
+          "pos": "G"
+        }
+      ]
+    },
+    "CHI": {
+      "name": "Chicago Blackhawks",
+      "injuries": [
+        {
+          "name": "Andrew Mangiapane",
+          "status": "вне состава"
+        },
+        {
+          "name": "Bowen Byram",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "DAL": {
+      "name": "Dallas Stars",
+      "injuries": [
+        {
+          "name": "Matt Duchene",
+          "status": "травмирован"
+        },
+        {
+          "name": "Wyatt Johnston",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Oskar Back",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "NSH": {
+      "name": "Nashville Predators",
+      "injuries": [
+        {
+          "name": "William Trudeau",
+          "status": "травмирован"
+        },
+        {
+          "name": "Mavrik Bourque",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "STL": {
+      "name": "St. Louis Blues",
+      "injuries": [
+        {
+          "name": "Logan Mailloux",
+          "status": "травмирован"
+        },
+        {
+          "name": "Tyler Tucker",
+          "status": "травмирован"
+        },
+        {
+          "name": "Alexey Toropchenko",
+          "status": "травмирован"
+        },
+        {
+          "name": "Dillon Dube",
+          "status": "травмирован"
+        },
+        {
+          "name": "Pavel Buchnevich",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "LAK": {
+      "name": "Los Angeles Kings",
+      "injuries": [
+        {
+          "name": "Alex Turcotte",
+          "status": "травмирован"
+        },
+        {
+          "name": "Mats Zuccarello",
+          "status": "травмирован"
+        },
+        {
+          "name": "Kevin Fiala",
+          "status": "вне состава"
+        }
+      ]
+    },
+    "UTA": {
+      "name": "Utah Mammoth",
+      "injuries": [
+        {
+          "name": "Michael Carcone",
+          "status": "вне состава"
+        }
+      ]
+    },
+    "EDM": {
+      "name": "Edmonton Oilers",
+      "injuries": [
+        {
+          "name": "Alec Regula",
+          "status": "травмирован"
+        },
+        {
+          "name": "Frederik Andersen",
+          "status": "травмирован",
+          "pos": "G"
+        },
+        {
+          "name": "Mattias Janmark",
+          "status": "травмирован"
+        },
+        {
+          "name": "Matthew Savoie",
+          "status": "травмирован"
+        },
+        {
+          "name": "Colton Dach",
+          "status": "травмирован"
+        },
+        {
+          "name": "Ryan Nugent-Hopkins",
+          "status": "травмирован"
+        },
+        {
+          "name": "Zach Hyman",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Jake Walman",
+          "status": "под вопросом"
+        },
+        {
+          "name": "Jason Dickinson",
+          "status": "под вопросом"
+        }
+      ]
+    },
+    "VGK": {
+      "name": "Vegas Golden Knights",
+      "injuries": [
+        {
+          "name": "Victor Olofsson",
+          "status": "вне состава"
+        },
+        {
+          "name": "Parker Wotherspoon",
+          "status": "вне состава"
+        }
+      ]
+    },
+    "MIN": {
+      "name": "Minnesota Wild",
+      "injuries": [
+        {
+          "name": "Brock Faber",
+          "status": "травмирован"
+        },
+        {
+          "name": "Filip Gustavsson",
+          "status": "вне состава",
+          "pos": "G"
+        },
+        {
+          "name": "Nick Foligno",
+          "status": "вне состава"
+        },
+        {
+          "name": "Nico Sturm",
+          "status": "вне состава"
+        },
+        {
+          "name": "Marcus Foligno",
+          "status": "вне состава"
+        },
+        {
+          "name": "Jared Spurgeon",
+          "status": "вне состава"
+        }
+      ]
+    },
+    "CGY": {
+      "name": "Calgary Flames",
+      "injuries": [
+        {
+          "name": "Jonathan Huberdeau",
+          "status": "вне состава"
+        },
+        {
+          "name": "Samuel Honzek",
+          "status": "под вопросом"
+        }
+      ]
+    }
+  }
+}
