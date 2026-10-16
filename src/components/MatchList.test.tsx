@@ -88,6 +88,28 @@ describe('MatchList · форма команд', () => {
     expect(lines[1].querySelector('.sr-only')?.textContent?.trim()).toBe('поражение')
   })
 
+  it('помечает матчи, решённые в овертайме и по буллитам', () => {
+    const recent: Record<string, Game[]> = {
+      CAR: [
+        { id: '1', date: '2026-10-06', home: 'CAR', away: 'BOS', hs: 4, as: 3, outcome: 'OT' },
+        { id: '2', date: '2026-10-04', home: 'BOS', away: 'CAR', hs: 2, as: 1, outcome: 'SO' },
+        { id: '3', date: '2026-10-02', home: 'CAR', away: 'NJD', hs: 5, as: 3, outcome: 'REG' },
+      ],
+      VAN: [{ id: '4', date: '2026-10-05', home: 'VAN', away: 'BOS', hs: 2, as: 3, outcome: 'REG' }],
+    }
+    const { container } = renderUpcoming((team) => recent[team] ?? [])
+    const lines = container.querySelectorAll('.match-form-game')
+    expect(lines).toHaveLength(4)
+    // Carolina: овертайм, буллиты, основное время.
+    expect(lines[0].querySelector('.badge [aria-hidden="true"]')?.textContent).toBe('ОТ')
+    expect(lines[0].querySelector('.badge')?.getAttribute('title')).toBe('Матч решён в овертайме')
+    expect(lines[1].querySelector('.badge [aria-hidden="true"]')?.textContent).toBe('БУЛ')
+    expect(lines[1].querySelector('.badge')?.getAttribute('title')).toBe('Матч решён по буллитам')
+    expect(lines[2].querySelector('.badge')).toBeNull()
+    // Vancouver: матч в основное время — без пометки.
+    expect(lines[3].querySelector('.badge')).toBeNull()
+  })
+
   it('без сыгранных матчей показывает заглушку для каждой команды', () => {
     const { container } = renderUpcoming(() => [])
     const form = container.querySelector('.match-form')

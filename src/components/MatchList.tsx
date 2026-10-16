@@ -198,6 +198,9 @@ export function MatchList({
                       const tone = own > opp ? 'ok' : own < opp ? 'bad' : 'draw'
                       const resultText = own > opp ? 'победа' : own < opp ? 'поражение' : 'ничья'
                       const keyClass = `match-form-key ${tone}`
+                      const outLabel = outcomeLabel(g.outcome)
+                      const outTitle =
+                        g.outcome === 'SO' ? 'Матч решён по буллитам' : g.outcome === 'OT' ? 'Матч решён в овертайме' : ''
                       return (
                         <span key={g.id ?? `${g.date}-${g.home}-${g.away}`} className="match-form-game">
                           <span className={`match-form-dot ${tone}`} aria-hidden="true">
@@ -208,6 +211,12 @@ export function MatchList({
                           {' — '}
                           <span className={isHome ? undefined : keyClass}>{nameOf(g.away)}</span>{' '}
                           <b className={tone}>{g.hs}:{g.as}</b>
+                          {outLabel && (
+                            <em className="badge" title={outTitle}>
+                              <span aria-hidden="true">{outLabel}</span>
+                              <span className="sr-only">{outTitle}</span>
+                            </em>
+                          )}
                           <span className="sr-only"> {resultText}</span>
                         </span>
                       )
