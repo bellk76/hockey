@@ -2,7 +2,7 @@ import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Game } from '../types'
 import type { StreakInfo } from '../utils/streaks'
-import { MatchList, type ListRow } from './MatchList'
+import { MatchList, type ListRow, type MarketLookup } from './MatchList'
 
 afterEach(cleanup)
 
@@ -221,5 +221,61 @@ describe('MatchList · бейджи серий', () => {
     expect(badge?.getAttribute('title')).toBe(
       'Победная серия к началу матча: 10 — уже превысила рекорд за 2 прошлых сезона (9)',
     )
+  })
+})
+
+describe('MatchList · суперматчи модели и рынка', () => {
+  const rowsMarket: ListRow[] = [
+    { date: '2026-10-08', home: 'CAR', away: 'VAN', pHome: 0.62, pAway: 0.38, hs: 4, as: 2 },
+    { date: '2026-10-08', home: 'BOS', away: 'NJD', pHome: 0.45, pAway: 0.55, hs: 2, as: 3 },
+  ]
+  const market: MarketLookup = (home) =>
+    home === 'CAR' ? { pHome: 0.7, pAway: 0.3 } : home === 'BOS' ? { pHome: 0.5, pAway: 0.5 } : null
+
+  function renderFrames(bestOf?: (date: string) => string | null, marketBestOf?: (date: string) => string | null) {
+    return render(
+      <MatchList
+        title="Матчи"
+        rows={rowsMarket}
+        nameOf={nameOf}
+        marketOf={market}
+        onSelect={onSelect}
+        emptyText=""
+        fullDate
+        bestOf={bestOf}
+        marketBestOf={marketBestOf}
+      />,
+    )
+  }
+
+  it('рисует фиолетовую рамку и бейдж «рынок»', () => {
+    const { container } = renderFrames(
+      () => null,
+      () => 'CAR-VAN',
+    )
+    const match = container.querySelector('.match.market-best')
+    expect(match).not.toBeNull()
+    expect(match?.classList.contains('best')).toBe(false)
+    const badge = match?.querySelector('.best-badge.market')
+    expect(badge?.textContent).toContain('◆')
+    expect(badge?.textContent).toContain('рынок')
+    expect(badge?.getAttribute('title')).toBe('Суперматч по мнению рынка')
+  })
+
+  it('совпадение: обе рамки и оба бейджа на одном матче', () => {
+    const { container } = renderFrames(
+      () => 'CAR-VAN',
+      () => 'CAR-VAN',
+    )
+    const match = container.querySelector('.match.best.market-best')
+    expect(match).not.toBeNull()
+    const model = match?.querySelector('.best-badge.model')
+    const marketBadge = match?.querySelector('.best-badge.market')
+    expect(model?.textContent).toContain('модель')
+    expect(model?.getAttribute('title')).toBe('Суперматч по мнению модели')
+    expect(marketBadge?.textContent).toContain('рынок')
+    // У второго матча рамок нет.
+    expect(container.querySelectorAll('.match.best')).toHaveLength(1)
+    expect(container.querySelectorAll('.match.market-best')).toHaveLength(1)
   })
 })

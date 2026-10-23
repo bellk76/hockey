@@ -28,6 +28,7 @@ interface MatchListProps {
   minConfidence?: number
   collapsibleDays?: boolean
   bestOf?: (date: string) => string | null
+  marketBestOf?: (date: string) => string | null
   recentOf?: (team: string, date: string, n?: number) => Game[]
   streakOf?: (team: string, date: string) => StreakInfo | null
   missingOf?: (abbrev: string) => Array<{ name: string; status: string; pos?: 'G' }>
@@ -81,6 +82,20 @@ function StreakBadge({ streak }: { streak: StreakInfo | null }) {
   )
 }
 
+// Бейдж суперматча с явной подписью, чтобы различать выбор модели и рынка.
+function BestBadge({ kind }: { kind: 'model' | 'market' }) {
+  const model = kind === 'model'
+  return (
+    <span
+      className={`best-badge ${kind}`}
+      title={model ? 'Суперматч по мнению модели' : 'Суперматч по мнению рынка'}
+    >
+      <span aria-hidden="true">{model ? '★' : '◆'}</span>
+      <span className="best-label">{model ? 'модель' : 'рынок'}</span>
+    </span>
+  )
+}
+
 export function MatchList({
   title,
   rows,
@@ -92,6 +107,7 @@ export function MatchList({
   minConfidence,
   collapsibleDays,
   bestOf,
+  marketBestOf,
   recentOf,
   streakOf,
   missingOf,
@@ -103,7 +119,7 @@ export function MatchList({
     byDate.set(r.date, list)
   }
 
-  const renderMatch = (r: ListRow, isBest: boolean, showDate: boolean) => {
+  const renderMatch = (r: ListRow, isBest: boolean, isMarketBest: boolean, showDate: boolean) => {
     const key = `${r.date}-${r.home}-${r.away}`
     const played = r.hs !== undefined && r.as !== undefined
     const winner = played ? (r.hs! > r.as! ? 'home' : 'away') : null
@@ -140,7 +156,7 @@ export function MatchList({
     const hasMissing = homeMissing.length > 0 || awayMissing.length > 0
 
     return (
-      <details key={key} className={`match${isBest ? ' best' : ''}`}>
+      <details key={key} className={`match${isBest ? ' best' : ''}${isMarketBest ? ' market-best' : ''}`}>
         <summary className="match-summary">
           {showDate && <span className="match-date">{fullDate ? r.date : r.date.slice(5)}</span>}
           <span className="match-teams">
@@ -158,7 +174,8 @@ export function MatchList({
             </span>
           </span>
           <span className="match-flag">
-            {isBest && <span className="best-badge">★</span>}
+            {isBest && <BestBadge kind="model" />}
+            {isMarketBest && <BestBadge kind="market" />}
             {played && hasModel ? (
               <span className={modelOk ? 'ok' : 'bad'}>{modelOk ? '✓' : '✗'}</span>
             ) : (
@@ -290,7 +307,11 @@ export function MatchList({
             bestKey = `${r.home}-${r.away}`
           }
         }
-        const body = dayRows.map((r) => renderMatch(r, `${r.home}-${r.away}` === bestKey, !collapsibleDays))
+        const marketBestKey = marketBestOf ? marketBestOf(day) : null
+        const body = dayRows.map((r) => {
+          const key = `${r.home}-${r.away}`
+          return renderMatch(r, key === bestKey, key === marketBestKey, !collapsibleDays)
+        })
         if (!collapsibleDays) {
           return (
             <div key={day} className="match-day">
@@ -318,7 +339,8 @@ export function MatchList({
                   </span>
                 )}
               </span>
-              {bestKey && <span className="best-badge">★</span>}
+              {bestKey && <BestBadge kind="model" />}
+              {marketBestKey && <BestBadge kind="market" />}
             </summary>
             {body}
           </details>

@@ -11,10 +11,11 @@ import updated from './data/updated.json'
 import { advancedKey, buildRatings, predictMatch, walkForward, type AdvancedIndex } from './model/model'
 import { blend, findMarket, oddsData } from './model/odds'
 import type { Game, ScheduledGame, TeamInfo } from './types'
+import { marketPicksByDay, tallySuperMatches } from './utils/best'
 import { recentGames } from './utils/form'
 import { readPicks, writePicks } from './utils/picks'
 import { seasonStartOf } from './utils/season'
-import { initialBank, initialConfidence, useSetting } from './utils/settings'
+import { initialBank, initialConfidence, initialMarketConfidence, useSetting } from './utils/settings'
 import { streakOf, streakPenalty } from './utils/streaks'
 
 const dataset = raw as { generatedAt: string; teams: TeamInfo[]; games: Game[] }
@@ -109,6 +110,13 @@ function latestDate(games: Game[]): string {
   return games.reduce((max, g) => (g.date > max ? g.date : max), '2020-01-01')
 }
 
+// Текст сводки суперматчей: «угадано N, промахов M (P%)».
+function superResultText(stats: { played: number; wins: number; losses: number }): string {
+  if (stats.played === 0) return 'нет сыгранных'
+  const pct = Math.round((stats.wins / stats.played) * 100)
+  return `угадано ${stats.wins}, промахов ${stats.losses} (${pct}%)`
+}
+
 function marketFromOdds(homeOdd: string, awayOdd: string) {
   const h = Number(homeOdd)
   const a = Number(awayOdd)
@@ -138,6 +146,7 @@ export default function App() {
   const [oddsAway, setOddsAway] = useState('')
   const [bank, setBank] = useSetting(initialBank, 'bank')
   const [confidence, setConfidence] = useSetting(initialConfidence, 'conf')
+  const [marketConfidence, setMarketConfidence] = useSetting(initialMarketConfidence, 'marketConf')
 
   // Ссылка на панель управления (controls). Нужна, чтобы после выбора матча
   // можно было программно прокрутить страницу к прогнозу наверх.
@@ -411,6 +420,45 @@ export default function App() {
 
   const bestOf = useCallback((date: string) => picks[date] ?? null, [picks])
 
+  // «Суперматч дня» по мнению рынка — независимо от модели: самый уверенный
+  // матч дня по де-виг вероятности, но не ниже порога рынка. Считается заново
+  // и для будущих, и для прошедших дней (кэфы можно догрузить позже). Выборы
+  // для прошедших и будущих матчей храним раздельно: в один день могут быть и
+  // сыгранные, и ещё не начавшиеся игры.
+  const marketPicksSeason = useMemo(
+    () => marketPicksByDay(seasonRows, marketOf, marketConfidence / 100),
+    [seasonRows, marketOf, marketConfidence],
+  )
+  const marketPicksUpcoming = useMemo(
+    () => marketPicksByDay(upcoming, marketOf, marketConfidence / 100),
+    [upcoming, marketOf, marketConfidence],
+  )
+
+  const marketBestOfSeason = useCallback((date: string) => marketPicksSeason[date] ?? null, [marketPicksSeason])
+  const marketBestOfUpcoming = useCallback(
+    (date: string) => marketPicksUpcoming[date] ?? null,
+    [marketPicksUpcoming],
+  )
+
+  // Сводка по прошедшим и будущим суперматчам — для модели и для рынка.
+  const superStats = useMemo(() => {
+    const modelFav = (r: ListRow) =>
+      Number.isFinite(r.pHome) && Number.isFinite(r.pAway)
+        ? ((r.pHome as number) >= (r.pAway as number) ? 'home' : 'away')
+        : null
+    const marketFav = (r: ListRow) => {
+      const m = marketOf(r.home, r.away, r.date)
+      if (!m || !Number.isFinite(m.pHome) || !Number.isFinite(m.pAway)) return null
+      return (m.pHome as number) >= (m.pAway as number) ? 'home' : 'away'
+    }
+    return {
+      // У модели один выбор на дату (так он хранится в localStorage); у рынка
+      // выборы для прошедших и будущих матчей считаются раздельно.
+      model: tallySuperMatches(seasonRows, picks, upcoming, picks, modelFav),
+      market: tallySuperMatches(seasonRows, marketPicksSeason, upcoming, marketPicksUpcoming, marketFav),
+    }
+  }, [seasonRows, upcoming, picks, marketPicksSeason, marketPicksUpcoming, marketOf])
+
   // Выбор матча одной операцией: задаёт хозяев, гостей и дату, а затем
   // плавно прокручивает страницу к панели прогноза (наверх).
   const select = useCallback((h: string, a: string, d: string) => {
@@ -677,6 +725,31 @@ export default function App() {
         <p className="caption">
           Модель — walk-forward (только по прошлым матчам). Рынок — по собранным кэфам, где есть результат.
         </p>
+
+        <h3 className="stats-subhead">Суперматчи: результат</h3>
+        <div className="grid">
+          <div>
+            <span className="label">Модель ★ · прошедшие</span>
+            <strong>{superResultText(superStats.model)}</strong>
+          </div>
+          <div>
+            <span className="label">Модель ★ · на будущее</span>
+            <strong>{superStats.model.upcoming}</strong>
+          </div>
+          <div>
+            <span className="label">Рынок ◆ · прошедшие</span>
+            <strong>{superResultText(superStats.market)}</strong>
+          </div>
+          <div>
+            <span className="label">Рынок ◆ · на будущее</span>
+            <strong>{superStats.market.upcoming}</strong>
+          </div>
+        </div>
+        <p className="caption">
+          Прошедшие — угадан ли фаворит выбранного суперматча (победа с учётом ОТ/буллитов). «На будущее» — сколько
+          матчей выбрано. Модель берёт сохранённые выборы; рынок — ретроспектива по текущим кэфам и порогу, поэтому
+          при смене порога его история пересчитывается (не walk-forward).
+        </p>
       </section>
 
       <p className="caption">
@@ -697,6 +770,7 @@ export default function App() {
         fullDate
         collapsibleDays
         bestOf={bestOf}
+        marketBestOf={marketBestOfSeason}
         minConfidence={confidence / 100}
         streakOf={streakLookup}
       />
@@ -709,12 +783,16 @@ export default function App() {
       )}
 
       <p className="caption">
-        Красная рамка ★ — самый уверенный матч игрового дня: модель и рынок согласны на фаворите, а уверенность
-        модели не ниже порога (по умолчанию 65%). При отборе дополнительно учитывается корректировка по сериям
-        🔥/💧: до −6% к вероятности фаворита (штраф фавориту на победной серии и при проигрышной серии
-        аутсайдера). На показанные вероятности корректировка не влияет. Порог регулируется ползунком «Уверенность
-        модели для красной рамки» в «Дополнительных настройках» внизу. В «Ближайших» рамка считается заново, а
-        когда матч становится сыгранным — сохраняется за ним, чтобы видеть, угадан ли прогноз на «суперматч».
+        <strong>★ модель</strong> (красная рамка) — самый уверенный матч дня, где модель и рынок согласны на
+        фаворите, а уверенность модели не ниже порога (по умолчанию 65%). Дополнительно учитывается корректировка
+        по сериям 🔥/💧: до −6% к вероятности фаворита (штраф фавориту на победной серии и при проигрышной серии
+        аутсайдера); на показанные вероятности она не влияет. Когда матч становится сыгранным, выбор сохраняется.
+        <br />
+        <strong>◆ рынок</strong> (фиолетовая рамка) — самый уверенный матч дня по мнению рынка: максимальная
+        де-виг вероятность фаворита, но не ниже своего порога (по умолчанию 68%). Согласие с моделью не требуется;
+        выбор пересчитывается и для прошедших дней по текущим кэфам. Пороги регулируются ползунками «Уверенность
+        модели для красной рамки» и «Уверенность рынка для фиолетовой рамки» в «Дополнительных настройках» внизу.
+        Если оба выбора совпали — красная рамка с внешним фиолетовым кольцом и оба бейджа.
       </p>
 
       <MatchList
@@ -725,13 +803,23 @@ export default function App() {
         onSelect={select}
         emptyText="Нет предстоящих матчей."
         bestOf={bestOf}
+        marketBestOf={marketBestOfUpcoming}
         minConfidence={confidence / 100}
         recentOf={recentOf}
         streakOf={streakLookup}
         missingOf={missingOf}
       />
 
-      <Bankroll bets={bets} bank={bank} onBank={setBank} day={TODAY} minConfidence={confidence} onMinConfidence={setConfidence} />
+      <Bankroll
+        bets={bets}
+        bank={bank}
+        onBank={setBank}
+        day={TODAY}
+        minConfidence={confidence}
+        onMinConfidence={setConfidence}
+        minMarketConfidence={marketConfidence}
+        onMinMarketConfidence={setMarketConfidence}
+      />
     </div>
   )
 }

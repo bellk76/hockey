@@ -312,6 +312,12 @@ input {
   font-size: 16px;
 }
 
+.matches .stats-subhead {
+  margin: 18px 0 8px;
+  font-size: 14px;
+  color: #344054;
+}
+
 .match-day {
   margin-bottom: 10px;
   padding: 8px;
@@ -398,8 +404,12 @@ input {
 }
 
 .match:hover {
-  border-color: #2e7dff;
   background: #f7faff;
+}
+
+/* Рамки суперматчей не перебиваем hover-подсветкой. */
+.match:not(.best):not(.market-best):hover {
+  border-color: #2e7dff;
 }
 
 .match.best {
@@ -407,9 +417,36 @@ input {
   box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.18);
 }
 
+.match.market-best {
+  border: 2px solid #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18);
+}
+
+/* Матч — суперматч и модели, и рынка: красная рамка + внешнее фиолетовое кольцо. */
+.match.best.market-best {
+  border-color: #d92d20;
+  box-shadow:
+    0 0 0 3px rgba(217, 45, 32, 0.18),
+    0 0 0 6px rgba(124, 58, 237, 0.32);
+}
+
 .best-badge {
   color: #d92d20;
   font-weight: 700;
+}
+
+.best-badge.market {
+  color: #7c3aed;
+}
+
+.best-label {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.best-badge + .best-badge {
+  margin-left: 8px;
 }
 
 .match-teams {

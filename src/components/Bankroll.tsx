@@ -30,6 +30,8 @@ interface BankrollProps {
   day: string
   minConfidence: number
   onMinConfidence: (value: number) => void
+  minMarketConfidence: number
+  onMinMarketConfidence: (value: number) => void
 }
 
 const MAX_STAKE_SHARE = 0.1
@@ -208,7 +210,16 @@ function maxProbabilityAllocation(candidates: Candidate[], bank: number): Alloca
   return best
 }
 
-export function Bankroll({ bets, bank, onBank, day, minConfidence, onMinConfidence }: BankrollProps) {
+export function Bankroll({
+  bets,
+  bank,
+  onBank,
+  day,
+  minConfidence,
+  onMinConfidence,
+  minMarketConfidence,
+  onMinMarketConfidence,
+}: BankrollProps) {
   const [basis, setBasis] = useSetting(initialBasis, 'basis2')
   const [threshold, setThreshold] = useSetting(initialThreshold, 'ev2')
   const [mode, setMode] = useSetting(initialMode, 'mode2')
@@ -491,6 +502,19 @@ export function Bankroll({ bets, bank, onBank, day, minConfidence, onMinConfiden
               step={1}
               value={minConfidence}
               onChange={(e) => onMinConfidence(Number(e.target.value))}
+            />
+          </label>
+        </div>
+        <div className="weight">
+          <label>
+            Уверенность рынка для фиолетовой рамки: {minMarketConfidence}% (от этого значения)
+            <input
+              type="range"
+              min={0}
+              max={90}
+              step={1}
+              value={minMarketConfidence}
+              onChange={(e) => onMinMarketConfidence(Number(e.target.value))}
             />
           </label>
         </div>
