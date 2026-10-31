@@ -23,7 +23,7 @@ if not exist "node_modules" (
 )
 
 echo Запускаю Hockey на http://localhost:%PORT%/ ...
-start "Hockey dev" cmd /c "npm run dev -- --port %PORT% --strictPort"
+start "Hockey dev" cmd /c "npm run dev -- --host 127.0.0.1 --port %PORT% --strictPort"
 
 timeout /t 4 /nobreak >nul
 start "" "http://localhost:%PORT%/"
