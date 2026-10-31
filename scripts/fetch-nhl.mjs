@@ -12,24 +12,34 @@ const OUT_SCHEDULE = join(here, '..', 'src', 'data', 'schedule.json')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+let fetchBroken = false
+
 async function getJson(url) {
+  if (fetchBroken) return curlJson(url)
+
   let lastError
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } })
+      const res = await fetch(url, {
+        headers: { 'User-Agent': UA, Accept: 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      })
       if (res.ok) return res.json()
       if (res.status === 404) return null
       await sleep(400 * attempt)
     } catch (e) {
       lastError = e
-      console.warn(`  fetch не удался (попытка ${attempt}/3): ${e.message}`)
-      await sleep(400 * attempt)
+      console.warn(`  fetch не удался (попытка ${attempt}/2): ${e.message}`)
+      await sleep(400)
     }
   }
+
   if (lastError) {
-    console.warn(`  fetch недоступен, пробую curl: ${url}`)
+    fetchBroken = true
+    console.warn('  fetch недоступен, переключаюсь на curl до конца запуска')
     return curlJson(url)
   }
+
   throw new Error('не удалось получить: ' + url)
 }
 

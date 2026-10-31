@@ -19,18 +19,30 @@ const CONCURRENCY = 6
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+let fetchBroken = false
+
 async function getJson(url) {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  if (fetchBroken) {
+    try { return await curlJson(url) } catch { return null }
+  }
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } })
+      const res = await fetch(url, {
+        headers: { 'User-Agent': UA, Accept: 'application/json' },
+        signal: AbortSignal.timeout(8000),
+      })
       if (res.ok) return res.json()
       if (res.status === 404) return null
     } catch {
       /* повтор */
     }
-    await sleep(300 * attempt)
+    await sleep(300)
   }
+
   // Фолбэк на системный curl — если встроенный fetch не доходит до сервера.
+  fetchBroken = true
+  console.warn('  fetch недоступен, переключаюсь на curl до конца запуска')
   try {
     return await curlJson(url)
   } catch {
