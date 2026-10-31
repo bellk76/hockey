@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { curlJson } from './curl-json.mjs'
 
 const BASE = 'https://api-web.nhle.com/v1'
 const UA =
@@ -29,7 +30,12 @@ async function getJson(url) {
     }
     await sleep(300 * attempt)
   }
-  return null
+  // Фолбэк на системный curl — если встроенный fetch не доходит до сервера.
+  try {
+    return await curlJson(url)
+  } catch {
+    return null
+  }
 }
 
 function aggregate(pbp) {

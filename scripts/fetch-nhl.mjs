@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { curlJson } from './curl-json.mjs'
 
 const BASE = 'https://api-web.nhle.com/v1'
 const UA =
@@ -12,11 +13,22 @@ const OUT_SCHEDULE = join(here, '..', 'src', 'data', 'schedule.json')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function getJson(url) {
+  let lastError
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } })
-    if (res.ok) return res.json()
-    if (res.status === 404) return null
-    await sleep(400 * attempt)
+    try {
+      const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } })
+      if (res.ok) return res.json()
+      if (res.status === 404) return null
+      await sleep(400 * attempt)
+    } catch (e) {
+      lastError = e
+      console.warn(`  fetch не удался (попытка ${attempt}/3): ${e.message}`)
+      await sleep(400 * attempt)
+    }
+  }
+  if (lastError) {
+    console.warn(`  fetch недоступен, пробую curl: ${url}`)
+    return curlJson(url)
   }
   throw new Error('не удалось получить: ' + url)
 }
