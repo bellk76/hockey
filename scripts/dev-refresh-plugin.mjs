@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process'
-import { rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const TMP = '.tmp-odds.json'
+const TMP_HIST = '.tmp-historic-odds.json'
 const PYTHON = process.env.HOCKEY_PYTHON || 'python'
 const ODDSHARVESTER = process.env.HOCKEY_ODDSHARVESTER || 'oddsharvester'
 // Основной www.oddsportal.com часто недоступен; зеркало (региональный домен) работает.
@@ -23,6 +24,26 @@ function resolveBaseUrl(raw) {
 }
 
 const ODDS_BASE_URL = resolveBaseUrl(process.env.HOCKEY_ODDS_BASE_URL || DEFAULT_BASE_URL)
+
+// Начало текущего сезона NHL (с 1 сентября) — по нему отделяем «прошедшие» матчи.
+function currentSeasonStart() {
+  const now = new Date()
+  const year = now.getUTCMonth() + 1 >= 9 ? now.getUTCFullYear() : now.getUTCFullYear() - 1
+  return `${year}-09-01`
+}
+
+// Сколько сыгранных матчей текущего сезона ещё не имеют кэфов.
+function missingPastOdds(root) {
+  try {
+    const games = JSON.parse(readFileSync(join(root, 'src', 'data', 'games.json'), 'utf8'))
+    const odds = JSON.parse(readFileSync(join(root, 'src', 'data', 'odds.json'), 'utf8'))
+    const start = currentSeasonStart()
+    const have = new Set((odds.odds ?? []).map((o) => `${o.date}_${o.home}_${o.away}`))
+    return (games.games ?? []).filter((g) => g.date >= start && !have.has(`${g.date}_${g.home}_${g.away}`)).length
+  } catch {
+    return 0
+  }
+}
 
 let running = false
 let currentChild = null
@@ -163,8 +184,29 @@ export function dataRefresh() {
               root,
               log,
             )
+            const oddsFiles = [TMP]
+            const missing = missingPastOdds(root)
+            if (missing > 0) {
+              send({ type: 'phase', phase: 'Прошедшие кэфы', percent: 65 })
+              log(`Не хватает кэфов у ${missing} прошедших матчей сезона — собираю historic…`)
+              await run(
+                ODDSHARVESTER,
+                [
+                  'historic', '-s', 'ice-hockey', '-l', 'nhl', '--season', 'current',
+                  '-m', 'home_away,over_under_5_5',
+                  '--headless', '-f', 'json', '-o', TMP_HIST,
+                  '--base-url', ODDS_BASE_URL, '--locale', ODDS_LOCALE, '--timezone', ODDS_TIMEZONE,
+                ],
+                root,
+                log,
+              )
+              oddsFiles.push(TMP_HIST)
+            } else {
+              log('Прошедшие матчи сезона уже покрыты кэфами — historic пропускаю.')
+            }
+
             send({ type: 'phase', phase: 'Конвертация', percent: 90 })
-            await run(PYTHON, ['scripts/convert_odds.py', TMP], root, log)
+            await run(PYTHON, ['scripts/convert_odds.py', ...oddsFiles], root, log)
             const updatedAt = new Date().toISOString()
             writeFileSync(join(root, 'src', 'data', 'updated.json'), JSON.stringify({ updatedAt }))
             send({ type: 'done', percent: 100, full: true, updatedAt })
@@ -179,6 +221,7 @@ export function dataRefresh() {
         } finally {
           try {
             rmSync(join(root, TMP), { force: true })
+            rmSync(join(root, TMP_HIST), { force: true })
           } catch {
             /* ignore */
           }
