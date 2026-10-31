@@ -125,7 +125,7 @@ node scripts/fetch-previews.mjs  # травмы/вне состава с Daily F
 **Коэффициенты** (Oddsportal через OddsHarvester, Python):
 
 ```bash
-pip install oddsharvester
+pip install "oddsharvester>=0.20"
 python -m playwright install chromium
 
 # предстоящие матчи: исход и тотал 5.5
