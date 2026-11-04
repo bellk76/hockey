@@ -186,7 +186,11 @@ export function dataRefresh() {
             )
             const oddsFiles = [TMP]
             const missing = missingPastOdds(root)
-            if (missing > 0) {
+            // historic (прошедшие кэфы) нестабилен и часто зависает на пагинации,
+            // из-за чего всё обновление упирается в 15-минутный таймаут. По умолчанию
+            // пропускаем; включить можно через HOCKEY_RUN_HISTORIC=1.
+            const runHistoric = /^(1|true|yes)$/i.test(process.env.HOCKEY_RUN_HISTORIC || '')
+            if (missing > 0 && runHistoric) {
               send({ type: 'phase', phase: 'Прошедшие кэфы', percent: 65 })
               log(`Не хватает кэфов у ${missing} прошедших матчей сезона — собираю historic…`)
               await run(
@@ -201,6 +205,8 @@ export function dataRefresh() {
                 log,
               )
               oddsFiles.push(TMP_HIST)
+            } else if (missing > 0) {
+              log(`Прошедшие матчи сезона без кэфов (${missing}) — historic пропущен (HOCKEY_RUN_HISTORIC не задан).`)
             } else {
               log('Прошедшие матчи сезона уже покрыты кэфами — historic пропускаю.')
             }
